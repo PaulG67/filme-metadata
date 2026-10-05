@@ -40,6 +40,22 @@ def test_api_key_goes_in_authorization_header():
     client.http.close()
 
 
+def test_clip_route_serves_only_a_local_preview(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from app.main import create_app
+
+    client = create_app().test_client()
+    assert client.get("/api/clip/series-1-id").status_code == 404
+    folder = tmp_path / "clips"
+    folder.mkdir()
+    (folder / "series-1-id.mp4").write_bytes(b"0" * 1200)
+    found = client.get("/api/clip/series-1-id")
+    assert found.status_code == 200
+    assert found.mimetype == "video/mp4"
+    assert found.data == b"0" * 1200
+    assert client.get("/api/clip/abcd").status_code == 404
+
+
 def test_health(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     from app.main import create_app

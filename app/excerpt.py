@@ -24,7 +24,9 @@ STOPWORDS = {
 
 
 class ExcerptError(RuntimeError):
-    pass
+    def __init__(self, message: str, clip: dict | None = None) -> None:
+        super().__init__(message)
+        self.clip = clip
 
 
 def movie_hash(head: bytes, tail: bytes, size: int) -> str:
@@ -37,6 +39,11 @@ def movie_hash(head: bytes, tail: bytes, size: int) -> str:
         for (value,) in struct.iter_unpack("<q", chunk):
             total = (total + value) & 0xFFFFFFFFFFFFFFFF
     return f"{total:016x}"
+
+
+def preview_offset(duration: float, length: int = 20) -> int:
+    offsets = sample_offsets(duration, length)
+    return offsets[len(offsets) // 2]
 
 
 def sample_offsets(duration: float, length: int = 20) -> list[int]:
@@ -160,4 +167,7 @@ def parse_subtitle_hit(attributes: dict) -> dict | None:
 
 def clock(seconds: int) -> str:
     seconds = max(0, int(seconds))
-    return f"{seconds // 60}:{seconds % 60:02d}"
+    hours, rest = divmod(seconds, 3600)
+    if hours:
+        return f"{hours}:{rest // 60:02d}:{rest % 60:02d}"
+    return f"{rest // 60}:{rest % 60:02d}"

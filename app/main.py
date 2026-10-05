@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, send_file
 
 from app.excerpt import ExcerptError
 from app.jellyfin import JellyfinError
@@ -118,6 +118,30 @@ def create_app() -> Flask:
         except (JellyfinError, RuntimeError, OSError) as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
 
+    @app.post("/api/clip")
+    def clip_create():
+        payload = request.get_json(silent=True) or {}
+        item_id = str(payload.get("item_id") or "")
+        if not item_id:
+            return jsonify({"ok": False, "error": "item_id fehlt"}), 400
+        try:
+            return jsonify(scanner.preview(item_id))
+        except ExcerptError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        except (JellyfinError, RuntimeError, OSError) as exc:
+            log.exception("Filmausschnitt fehlgeschlagen")
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+    @app.get("/api/clip/<item_id>")
+    def clip_file(item_id: str):
+        from app.config import load_settings
+        from app.listen import clip_file as clip_path
+
+        path = clip_path(load_settings(), item_id)
+        if path is None or not path.is_file():
+            return jsonify({"ok": False, "error": "Kein Ausschnitt vorhanden"}), 404
+        return send_file(path, mimetype="video/mp4", conditional=True, max_age=0)
+
     @app.post("/api/listen")
     def listen():
         payload = request.get_json(silent=True) or {}
@@ -127,7 +151,10 @@ def create_app() -> Flask:
         try:
             return jsonify(scanner.listen(item_id))
         except ExcerptError as exc:
-            return jsonify({"ok": False, "error": str(exc)}), 400
+            body = {"ok": False, "error": str(exc)}
+            if exc.clip:
+                body.update(exc.clip)
+            return jsonify(body), 400
         except KeyError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 404
         except (JellyfinError, RuntimeError, OSError) as exc:

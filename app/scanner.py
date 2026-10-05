@@ -265,24 +265,18 @@ class Scanner:
             self._save()
         return {"ok": True, "clean": False, "item": summary, "issue": None}
 
+    def preview(self, item_id: str) -> dict:
+        from app.listen import playback_source, save_clip
+
+        settings, client, item, target_id, kind_hint, playable = self._playback(item_id)
+        source = playback_source(client, item, kind_hint, playable)
+        return {"ok": True, **save_clip(client, settings, target_id, source)}
+
     def listen(self, item_id: str) -> dict:
         from app.excerpt import ExcerptError
         from app.listen import recognize
 
-        settings = load_settings()
-        client = _client(settings)
-        item = client.media_item(item_id)
-        target_id = item_id
-        kind_hint = "movie"
-        playable = None
-        if item.get("Type") == "Episode":
-            target_id = str(item.get("SeriesId") or "")
-            if not target_id:
-                raise RuntimeError("Die Folge ist keiner Serie zugeordnet")
-            kind_hint = "series"
-            playable = item
-        elif item.get("Type") == "Series":
-            kind_hint = "series"
+        settings, client, item, target_id, kind_hint, playable = self._playback(item_id)
         with self._lock:
             if self._state["running"]:
                 raise RuntimeError("Scan läuft noch")
@@ -300,7 +294,30 @@ class Scanner:
             self._store_listen(target_id, payload)
             self._remember_stats()
             self._save()
-        return {"ok": True, "message": payload["message"]}
+        return {
+            "ok": True,
+            "message": payload["message"],
+            "clip_id": payload.get("clip_id"),
+            "clip_label": payload.get("clip_label"),
+            "clip_offset": payload.get("clip_offset"),
+        }
+
+    def _playback(self, item_id: str):
+        settings = load_settings()
+        client = _client(settings)
+        item = client.media_item(item_id)
+        target_id = item_id
+        kind_hint = "movie"
+        playable = None
+        if item.get("Type") == "Episode":
+            target_id = str(item.get("SeriesId") or "")
+            if not target_id:
+                raise RuntimeError("Die Folge ist keiner Serie zugeordnet")
+            kind_hint = "series"
+            playable = item
+        elif item.get("Type") == "Series":
+            kind_hint = "series"
+        return settings, client, item, target_id, kind_hint, playable
 
     def ignore(self, item_id: str) -> None:
         with self._lock:
@@ -519,7 +536,6 @@ class Scanner:
     def _store_listen(self, item_id: str, payload: dict) -> None:
         finding = next((item for item in self._state["findings"] if item["item_id"] == item_id), None)
         note = payload.get("note") or ""
-        transcript = payload.get("transcript") or ""
         if payload.get("promote_key") and finding is not None:
             chosen = next((item for item in finding["candidates"] if item.get("key") == payload["promote_key"]), None)
             if chosen is None:
@@ -534,30 +550,30 @@ class Scanner:
             finding["candidates"] = [chosen, *rest]
             finding["status"] = "sure"
             finding["reason"] = note
-            finding["excerpt_transcript"] = transcript
+            _apply_excerpt(finding, payload)
             return
         candidate = payload.get("candidate")
         if not candidate:
+            if finding is not None:
+                _apply_excerpt(finding, payload)
             return
         if finding is None:
-            self._state["findings"].insert(
-                0,
-                {
-                    "item_id": item_id,
-                    "kind": payload.get("kind") or "movie",
-                    "path": payload.get("path") or "",
-                    "folder_title": candidate.get("name") or "",
-                    "folder_year": candidate.get("year"),
-                    "jellyfin_name": payload.get("jellyfin_name") or "",
-                    "jellyfin_year": payload.get("jellyfin_year"),
-                    "jellyfin_ids": {},
-                    "reason": note,
-                    "status": "sure",
-                    "candidates": [candidate],
-                    "episode_issues": [],
-                    "excerpt_transcript": transcript,
-                },
-            )
+            created = {
+                "item_id": item_id,
+                "kind": payload.get("kind") or "movie",
+                "path": payload.get("path") or "",
+                "folder_title": candidate.get("name") or "",
+                "folder_year": candidate.get("year"),
+                "jellyfin_name": payload.get("jellyfin_name") or "",
+                "jellyfin_year": payload.get("jellyfin_year"),
+                "jellyfin_ids": {},
+                "reason": note,
+                "status": "sure",
+                "candidates": [candidate],
+                "episode_issues": [],
+            }
+            _apply_excerpt(created, payload)
+            self._state["findings"].insert(0, created)
             return
         for item in finding["candidates"]:
             item["auto"] = False
@@ -565,7 +581,7 @@ class Scanner:
         finding["candidates"] = [candidate, *others][:6]
         finding["status"] = "sure"
         finding["reason"] = note
-        finding["excerpt_transcript"] = transcript
+        _apply_excerpt(finding, payload)
 
     def _remember_stats(self) -> None:
         findings = self._state["findings"]
@@ -615,6 +631,14 @@ def _client(settings: Settings) -> JellyfinClient:
         settings.jellyfin_password,
         settings.verify_tls,
     )
+
+
+def _apply_excerpt(finding: dict, payload: dict) -> None:
+    finding["excerpt_transcript"] = payload.get("transcript") or ""
+    if payload.get("clip_id"):
+        finding["excerpt_clip"] = True
+        finding["excerpt_offset"] = payload.get("clip_offset")
+        finding["excerpt_label"] = payload.get("clip_label") or ""
 
 
 def library_hit(item: dict) -> dict:

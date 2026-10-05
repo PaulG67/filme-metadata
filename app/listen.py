@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 import logging
+import re
 import shutil
 import subprocess
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 from app.config import Settings
@@ -12,6 +15,7 @@ from app.excerpt import (
     ExcerptError,
     clock,
     movie_hash,
+    preview_offset,
     quote_match,
     sample_offsets,
 )
@@ -23,6 +27,110 @@ log = logging.getLogger("filme-metadata")
 _model_lock = threading.Lock()
 _model = None
 _model_name = ""
+_CLIP_ID = re.compile(r"^[A-Za-z0-9-]{8,64}$")
+_CLIP_MAX_AGE = 900
+
+
+def playback_source(client: JellyfinClient, item: dict, kind_hint: str | None, playable: dict | None) -> dict:
+    if playable is not None:
+        return playable
+    if item.get("Type") == "Episode":
+        return item
+    if item.get("Type") == "Series" or kind_hint == "series":
+        return _middle_episode(client, str(item.get("Id") or ""))
+    return item
+
+
+def clip_file(settings: Settings, item_id: str) -> Path | None:
+    if not _CLIP_ID.fullmatch(item_id or ""):
+        return None
+    return settings.data_dir / "clips" / f"{item_id}.mp4"
+
+
+def clip_label(item: dict, offset: int) -> str:
+    name = item.get("Name") or "Ausschnitt"
+    when = clock(offset)
+    if item.get("Type") == "Episode":
+        series = item.get("SeriesName") or ""
+        season = item.get("ParentIndexNumber")
+        episode = item.get("IndexNumber")
+        index = f"S{int(season):02d}E{int(episode):02d} " if season and episode else ""
+        prefix = f"{series} · " if series else ""
+        return f"{prefix}{index}{name} · ab {when}"
+    year = item.get("ProductionYear")
+    title = f"{name} ({year})" if year else name
+    return f"{title} · ab {when}"
+
+
+def save_clip(
+    client: JellyfinClient,
+    settings: Settings,
+    clip_id: str,
+    source: dict,
+    offset: int | None = None,
+) -> dict:
+    path = clip_file(settings, clip_id)
+    if path is None:
+        raise ExcerptError("Ungültige Kennung für den Ausschnitt")
+    if not source.get("Id"):
+        raise ExcerptError("Die Datei hat keine Jellyfin-Kennung")
+    if shutil.which("ffmpeg") is None:
+        raise ExcerptError("ffmpeg fehlt im Container")
+    ticks = float(source.get("RunTimeTicks") or 0)
+    duration = ticks / 10_000_000 if ticks else 0
+    if offset is None:
+        offset = preview_offset(duration, settings.excerpt_seconds)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".part.mp4")
+    _extract_mp4(client, str(source["Id"]), int(offset), settings.excerpt_seconds, temporary)
+    temporary.replace(path)
+    info = {
+        "clip_id": clip_id,
+        "clip_offset": int(offset),
+        "clip_label": clip_label(source, int(offset)),
+        "source_id": str(source.get("Id") or ""),
+    }
+    path.with_suffix(".json").write_text(json.dumps(info), encoding="utf-8")
+    return info
+
+
+def fresh_clip(settings: Settings, clip_id: str, source_id: str) -> dict | None:
+    info = _stored_clip(settings, clip_id)
+    path = clip_file(settings, clip_id)
+    if not info or path is None or not path.is_file():
+        return None
+    if time.time() - path.stat().st_mtime > _CLIP_MAX_AGE:
+        return None
+    if source_id and info.get("source_id") != source_id:
+        return None
+    return info
+
+
+def _stored_clip(settings: Settings, clip_id: str) -> dict | None:
+    path = clip_file(settings, clip_id)
+    if path is None or not path.is_file() or path.stat().st_size < 1000:
+        return None
+    meta = path.with_suffix(".json")
+    if not meta.is_file():
+        return {"clip_id": clip_id, "clip_offset": 0, "clip_label": "Filmausschnitt", "source_id": ""}
+    try:
+        info = json.loads(meta.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"clip_id": clip_id, "clip_offset": 0, "clip_label": "Filmausschnitt", "source_id": ""}
+    if not isinstance(info, dict) or not info.get("clip_id"):
+        return None
+    return info
+
+
+def _ensure_clip(client: JellyfinClient, settings: Settings, clip_id: str, source: dict) -> dict:
+    try:
+        found = fresh_clip(settings, clip_id, str(source.get("Id") or ""))
+        if found:
+            return found
+        return save_clip(client, settings, clip_id, source)
+    except ExcerptError as exc:
+        log.warning("Videovorschau übersprungen: %s", exc)
+        return {}
 
 
 def recognize(
@@ -39,14 +147,8 @@ def recognize(
         settings.opensubtitles_password,
     )
     item = playable or client.media_item(item_id)
-    kind = "movie"
-    source = item
-    if item.get("Type") == "Episode":
-        kind = "series"
-        source = item
-    elif item.get("Type") == "Series" or kind_hint == "series":
-        kind = "series"
-        source = _middle_episode(client, item.get("Id") or item_id)
+    kind = "series" if item.get("Type") in {"Episode", "Series"} or kind_hint == "series" else "movie"
+    source = playback_source(client, item, kind_hint, playable)
     hit = _hash_hit(client, subtitles, source)
     if hit:
         note = "Datei-Fingerabdruck trifft diese Fassung"
@@ -61,9 +163,10 @@ def recognize(
             "path": source.get("Path") or item.get("Path") or "",
             "jellyfin_name": item.get("Name") or "",
             "jellyfin_year": item.get("ProductionYear"),
+            **_ensure_clip(client, settings, item_id, source),
         }
     season, episode = _season_episode(source)
-    transcript, offset = _hear(client, settings, source)
+    transcript, offset, clip = _hear(client, settings, source, item_id)
     matched: list[tuple[dict, str]] = []
     for candidate in candidates[:4]:
         text = _subtitle_for_candidate(subtitles, candidate, kind, season, episode)
@@ -84,16 +187,21 @@ def recognize(
             "path": source.get("Path") or "",
             "jellyfin_name": item.get("Name") or "",
             "jellyfin_year": item.get("ProductionYear"),
+            **clip,
         }
     if len(matched) > 1:
         names = ", ".join(item[0].get("name") or "?" for item in matched)
-        raise ExcerptError(f"Der Satz passt zu mehreren Treffern: {names}")
+        raise ExcerptError(f"Der Satz passt zu mehreren Treffern: {names}", clip=clip or None)
     if not candidates:
         raise ExcerptError(
             "Die Datei ist bei OpenSubtitles unbekannt, und es gibt keine Titel-Kandidaten "
-            f"für den Dialogvergleich. Gehörter Text: „{shown}“"
+            f"für den Dialogvergleich. Gehörter Text: „{shown}“",
+            clip=clip or None,
         )
-    raise ExcerptError(f"Keiner der Kandidaten enthält diesen Dialog. Gehörter Text: „{shown}“")
+    raise ExcerptError(
+        f"Keiner der Kandidaten enthält diesen Dialog. Gehörter Text: „{shown}“",
+        clip=clip or None,
+    )
 
 
 def _hash_hit(client: JellyfinClient, subtitles: OpenSubtitles, item: dict) -> dict | None:
@@ -132,29 +240,49 @@ def _season_episode(item: dict) -> tuple[int | None, int | None]:
     return parsed
 
 
-def _hear(client: JellyfinClient, settings: Settings, item: dict) -> tuple[str, int]:
+def _hear(client: JellyfinClient, settings: Settings, item: dict, clip_id: str) -> tuple[str, int, dict]:
     if not settings.opensubtitles_username:
         raise ExcerptError(
             "Die Datei ist bei OpenSubtitles nicht bekannt. Für den Dialog-Ausschnitt "
-            "OPENSUBTITLES_USERNAME und OPENSUBTITLES_PASSWORD setzen."
+            "OPENSUBTITLES_USERNAME und OPENSUBTITLES_PASSWORD setzen.",
+            clip=_stored_clip(settings, clip_id),
         )
     if shutil.which("ffmpeg") is None:
-        raise ExcerptError("ffmpeg fehlt im Container")
+        raise ExcerptError("ffmpeg fehlt im Container", clip=_stored_clip(settings, clip_id))
     ticks = float(item.get("RunTimeTicks") or 0)
     duration = ticks / 10_000_000 if ticks else 0
     offsets = sample_offsets(duration, settings.excerpt_seconds)
     last_text = ""
-    with tempfile.TemporaryDirectory(prefix="excerpt-") as folder:
-        wav = Path(folder) / "clip.wav"
-        for offset in offsets:
-            _extract_wav(client, item["Id"], offset, settings.excerpt_seconds, wav)
-            last_text = _transcribe(wav, settings)
-            words = [part for part in last_text.split() if len(part) > 2]
-            if len(words) >= 8:
-                return last_text.strip(), offset
+    saved = fresh_clip(settings, clip_id, str(item.get("Id") or ""))
+    order = list(offsets)
+    if saved and saved.get("clip_offset") in order:
+        order.remove(saved["clip_offset"])
+        order.insert(0, int(saved["clip_offset"]))
+    elif saved:
+        order.insert(0, int(saved["clip_offset"]))
+    for offset in order:
+        media = clip_file(settings, clip_id)
+        reuse = (
+            saved is not None
+            and int(saved.get("clip_offset") or -1) == int(offset)
+            and media is not None
+            and media.is_file()
+        )
+        if reuse:
+            info = saved
+        else:
+            info = save_clip(client, settings, clip_id, item, offset)
+            media = clip_file(settings, clip_id)
+            saved = info
+        if media is None or not media.is_file():
+            continue
+        last_text = _transcribe_media(media, settings)
+        words = [part for part in last_text.split() if len(part) > 2]
+        if len(words) >= 8:
+            return last_text.strip(), offset, info
     if len(last_text.split()) < 4:
-        raise ExcerptError("Im Ausschnitt war kein erkennbarer Dialog")
-    return last_text.strip(), offsets[-1]
+        raise ExcerptError("Im Ausschnitt war kein erkennbarer Dialog", clip=saved)
+    return last_text.strip(), order[-1], saved or {}
 
 
 def _extract_wav(client: JellyfinClient, item_id: str, offset: int, seconds: int, dest: Path) -> None:
@@ -189,6 +317,83 @@ def _extract_wav(client: JellyfinClient, item_id: str, offset: int, seconds: int
     if completed.returncode != 0 or not dest.exists() or dest.stat().st_size < 1000:
         detail = completed.stderr.decode("utf-8", "replace")[-240:].replace(token, "***")
         raise ExcerptError(f"Ton-Ausschnitt fehlgeschlagen: {detail}".strip())
+
+
+def _extract_mp4(client: JellyfinClient, item_id: str, offset: int, seconds: int, dest: Path) -> None:
+    token = (client.token or "").replace("\r", "").replace("\n", "")
+    shared = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        str(offset),
+        "-t",
+        str(seconds),
+        "-headers",
+        client.ffmpeg_headers(),
+        "-i",
+        client.static_stream_url(item_id),
+        "-vf",
+        "scale=-2:480",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "28",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        "-y",
+        str(dest),
+    ]
+    with_audio = shared[:-2] + ["-c:a", "aac", "-ac", "2", "-b:a", "96k", "-y", str(dest)]
+    picture = shared[:-2] + ["-an", "-y", str(dest)]
+    error = _run_ffmpeg(with_audio, token, dest, 150, "Filmausschnitt")
+    if error is None:
+        return
+    error = _run_ffmpeg(picture, token, dest, 150, "Filmausschnitt")
+    if error is not None:
+        raise ExcerptError(error)
+
+
+def _transcribe_media(media: Path, settings: Settings) -> str:
+    with tempfile.TemporaryDirectory(prefix="excerpt-") as folder:
+        wav = Path(folder) / "clip.wav"
+        command = [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(media),
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-f",
+            "wav",
+            "-y",
+            str(wav),
+        ]
+        error = _run_ffmpeg(command, "", wav, 60, "Ton aus dem Ausschnitt")
+        if error is not None:
+            raise ExcerptError(error)
+        return _transcribe(wav, settings)
+
+
+def _run_ffmpeg(command: list[str], token: str, dest: Path, timeout: int, label: str) -> str | None:
+    try:
+        completed = subprocess.run(command, capture_output=True, timeout=timeout, check=False)
+    except subprocess.TimeoutExpired:
+        return f"{label} hat zu lange gedauert"
+    if completed.returncode != 0 or not dest.exists() or dest.stat().st_size < 1000:
+        detail = completed.stderr.decode("utf-8", "replace")[-240:].replace(token, "***") if token else completed.stderr.decode("utf-8", "replace")[-240:]
+        return f"{label} fehlgeschlagen: {detail}".strip()
+    return None
 
 
 def _transcribe(wav: Path, settings: Settings) -> str:

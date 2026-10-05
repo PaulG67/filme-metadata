@@ -1,14 +1,20 @@
 import struct
 
+from pathlib import Path
+from types import SimpleNamespace
+
 from app.excerpt import (
+    ExcerptError,
     clock,
     content_words,
     movie_hash,
     parse_subtitle_hit,
+    preview_offset,
     quote_match,
     sample_offsets,
     srt_to_text,
 )
+from app.listen import clip_file, clip_label
 
 
 def test_hash_of_empty_edges_is_the_file_size():
@@ -115,3 +121,37 @@ def test_movie_hit_keeps_the_movie_id():
 
 def test_clock():
     assert clock(754) == "12:34"
+    assert clock(3661) == "1:01:01"
+
+
+def test_preview_offset_uses_the_middle_of_the_film():
+    assert preview_offset(7200, 20) == 3456
+    assert preview_offset(10, 20) == 0
+
+
+def test_clip_file_rejects_paths_outside_the_data_dir():
+    settings = SimpleNamespace(data_dir=Path("data"))
+    assert clip_file(settings, "../secrets") is None
+    assert clip_file(settings, "abcd") is None
+    path = clip_file(settings, "series-1-id")
+    assert path == Path("data") / "clips" / "series-1-id.mp4"
+
+
+def test_clip_label_names_the_episode():
+    label = clip_label(
+        {
+            "Type": "Episode",
+            "Name": "Behold... The Inhumans",
+            "SeriesName": "Marvel's Inhumans",
+            "ParentIndexNumber": 1,
+            "IndexNumber": 1,
+        },
+        754,
+    )
+    assert label == "Marvel's Inhumans · S01E01 Behold... The Inhumans · ab 12:34"
+
+
+def test_excerpt_error_can_carry_the_clip():
+    assert ExcerptError("kein Dialog").clip is None
+    err = ExcerptError("kein Dialog", clip={"clip_id": "series-1-id"})
+    assert err.clip["clip_id"] == "series-1-id"
