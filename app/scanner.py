@@ -25,6 +25,7 @@ from app.identify import (
 )
 from app.jellyfin import JellyfinClient, JellyfinError, candidate_from_jellyfin
 from app.plex import PlexClient, PlexError, PlexIndex
+from app.posters import fetch_poster, poster_url
 from app.tmdb import TmdbClient
 
 log = logging.getLogger("filme-metadata")
@@ -271,6 +272,67 @@ class Scanner:
         settings, client, item, target_id, kind_hint, playable = self._playback(item_id)
         source = playback_source(client, item, kind_hint, playable)
         return {"ok": True, **save_clip(client, settings, target_id, source)}
+
+    def poster(self, item_id: str, side: str, key: str) -> tuple[bytes, str]:
+        settings = load_settings()
+        client = _client(settings)
+        try:
+            if side == "current":
+                image = client.primary_image(item_id)
+                if image is None:
+                    raise KeyError("Kein Plakat")
+                return image
+            if side != "proposal":
+                raise KeyError("Unbekannte Seite")
+            with self._lock:
+                finding = next((item for item in self._state["findings"] if item["item_id"] == item_id), None)
+                if finding is None:
+                    raise KeyError("Eintrag nicht gefunden")
+                candidate = _poster_candidate(finding, key)
+                url = poster_url(candidate.get("poster"))
+            if not url:
+                url = self._resolve_poster(client, settings, finding, candidate)
+                if url:
+                    with self._lock:
+                        current = next((item for item in self._state["findings"] if item["item_id"] == item_id), None)
+                        if current is not None:
+                            _poster_candidate(current, key)["poster"] = url
+                            self._save()
+            if not url:
+                raise KeyError("Kein Plakat")
+            return fetch_poster(url)
+        finally:
+            client.http.close()
+
+    def _resolve_poster(self, client: JellyfinClient, settings: Settings, finding: dict, candidate: dict) -> str:
+        kind = "movie" if finding.get("kind") == "movie" else "series"
+        ids = candidate.get("provider_ids") or {}
+        try:
+            results = client.remote_search_provider(
+                kind,
+                candidate.get("name") or "",
+                candidate.get("year"),
+                str(finding.get("item_id") or ""),
+                ids,
+            )
+        except JellyfinError:
+            results = []
+        for result in results:
+            url = poster_url(result.get("ImageUrl"))
+            if url:
+                return url
+        tmdb_id = str(ids.get("Tmdb") or ids.get("tmdb") or "")
+        if not settings.tmdb_api_key or not tmdb_id.isdigit():
+            return ""
+        tmdb = TmdbClient(settings.tmdb_api_key)
+        try:
+            described = tmdb.describe(kind, tmdb_id)
+        except Exception:
+            log.warning("TMDB-Plakat nicht geladen", exc_info=True)
+            return ""
+        finally:
+            tmdb.http.close()
+        return poster_url(described.get("poster"))
 
     def listen(self, item_id: str) -> dict:
         from app.excerpt import ExcerptError
@@ -523,6 +585,7 @@ class Scanner:
                     "original_name": candidate.original_name,
                     "provider_ids": jellyfin_provider_ids(candidate.provider_ids),
                     "overview": (candidate.overview or "")[:400],
+                    "poster": poster_url(candidate.poster),
                     "auto": False,
                     "notes": [],
                     "score": candidate.score,
@@ -631,6 +694,19 @@ def _client(settings: Settings) -> JellyfinClient:
         settings.jellyfin_password,
         settings.verify_tls,
     )
+
+
+def _poster_candidate(finding: dict, key: str) -> dict:
+    candidates = [
+        item for item in finding.get("candidates") or [] if not str(item.get("key") or "").startswith("side:")
+    ]
+    if key:
+        chosen = next((item for item in candidates if item.get("key") == key), None)
+        if chosen is not None:
+            return chosen
+    if not candidates:
+        raise KeyError("Kein Vorschlag")
+    return candidates[0]
 
 
 def _apply_excerpt(finding: dict, payload: dict) -> None:

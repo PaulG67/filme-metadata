@@ -4,7 +4,8 @@ import logging
 
 from pathlib import Path
 
-from flask import Flask, jsonify, render_template, request, send_file
+import httpx
+from flask import Flask, Response, jsonify, render_template, request, send_file
 
 from app.excerpt import ExcerptError
 from app.jellyfin import JellyfinError
@@ -59,6 +60,21 @@ def create_app() -> Flask:
         except RuntimeError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 409
         return jsonify({"ok": True})
+
+    @app.get("/api/poster/<item_id>")
+    def poster(item_id: str):
+        if not item_id or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-" for ch in item_id):
+            return Response(status=404)
+        side = str(request.args.get("side") or "current")
+        key = str(request.args.get("key") or "")
+        try:
+            data, mime = scanner.poster(item_id, side, key)
+        except KeyError:
+            return Response(status=404)
+        except (JellyfinError, OSError, RuntimeError, ValueError, httpx.HTTPError) as exc:
+            log.warning("Plakat nicht geladen: %s", exc)
+            return Response(status=404)
+        return Response(data, mimetype=mime, headers={"Cache-Control": "private, max-age=3600"})
 
     @app.get("/api/title")
     def title_detail():

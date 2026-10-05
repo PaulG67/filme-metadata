@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from pathlib import PurePosixPath
 
+from app.posters import poster_url
+
 AUTO_SCORE = 0.82
 AUTO_MARGIN = 0.15
 SUSPECT_TITLE = 0.80
@@ -330,6 +332,7 @@ class Candidate:
     auto: bool = False
     pinned: bool = False
     notes: list[str] = field(default_factory=list)
+    poster: str = ""
     raw: dict | None = None
 
     def __post_init__(self) -> None:
@@ -359,6 +362,8 @@ def merge_candidates(candidates: list[Candidate]) -> list[Candidate]:
             current.seasons = candidate.seasons
         if candidate.overview and not current.overview:
             current.overview = candidate.overview
+        if candidate.poster and not current.poster:
+            current.poster = candidate.poster
         if candidate.original_name and not current.original_name:
             current.original_name = candidate.original_name
         if candidate.year and not current.year:
@@ -552,6 +557,7 @@ def _public_candidate(candidate: Candidate) -> dict:
         "year": candidate.year,
         "provider_ids": jellyfin_provider_ids(candidate.provider_ids),
         "overview": (candidate.overview or "")[:400],
+        "poster": poster_url(candidate.poster or ((candidate.raw or {}).get("ImageUrl"))),
         "source": candidate.source,
         "score": round(candidate.score, 3),
         "title_score": round(candidate.title_score, 3),

@@ -66,6 +66,14 @@
     h1 img { width: 36px; height: 36px; vertical-align: -8px; margin-right: .4rem; border-radius: 8px; }
     .detail-grid { display: grid; grid-template-columns: 132px 1fr; gap: .9rem; align-items: start; }
     .detail-grid img { width: 132px; border-radius: 8px; background: #10141c; }
+    .posters { display: flex; flex-wrap: wrap; gap: 16px; margin: 4px 0 14px; }
+    .posters figure { margin: 0; width: 148px; }
+    .posters img, .poster-missing {
+      width: 148px; height: 222px; object-fit: cover; border-radius: 10px;
+      background: #0e1320; border: 1px solid var(--line); display: block;
+    }
+    .poster-missing { display: grid; place-items: center; color: var(--muted); font-size: 13px; text-align: center; padding: 12px; }
+    .posters figcaption { margin-top: 6px; color: var(--muted); font-size: 12px; text-align: center; }
     iframe.trailer { width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: 8px; background: #000; margin-top: .7rem; }
     .idhint { margin: .45rem 0 0; font-size: .85rem; }
     @media (max-width: 640px) { .detail-grid { grid-template-columns: 1fr; } .detail-grid img { width: 120px; } }
@@ -386,6 +394,15 @@
       return changedFields(finding).length > 0 || (finding.episode_issues || []).length > 0;
     }
 
+    function posterFigures(finding) {
+      const proposal = proposalOf(finding);
+      const current = `<figure><img data-poster alt="" src="/api/poster/${encodeURIComponent(finding.item_id)}?side=current"><figcaption>Jetzt in Jellyfin</figcaption></figure>`;
+      const next = proposal
+        ? `<figure><img data-poster alt="" src="/api/poster/${encodeURIComponent(finding.item_id)}?side=proposal&key=${encodeURIComponent(proposal.key || "")}"><figcaption>Nach der Änderung</figcaption></figure>`
+        : "";
+      return `<div class="posters">${current}${next}</div>`;
+    }
+
     function compareTable(finding) {
       const columns = compareColumns(finding);
       const body = changedFields(finding).map((label) => {
@@ -499,6 +516,7 @@
             ${proposalLabel ? `<span class="arrow">→</span><span class="after">${esc(proposalLabel)}</span>` : ""}
           </h3>
           <div class="muted">${esc(finding.reason || "")}</div>
+          ${posterFigures(finding)}
           ${compareTable(finding)}
           ${finding.excerpt_transcript ? `<div class="muted">Gehört: „${esc(finding.excerpt_transcript)}“</div>` : ""}
           ${episodeRows(finding)}
@@ -739,6 +757,15 @@
         box.innerHTML = `<h2>${esc(name)}${esc(year)}</h2><p>Angaben nicht geladen.</p><button type="button" class="secondary" id="clearDetail">Schließen</button>`;
       }
     }
+
+    document.addEventListener("error", (event) => {
+      const image = event.target;
+      if (!image || !image.dataset || image.dataset.poster == null) return;
+      const missing = document.createElement("div");
+      missing.className = "poster-missing";
+      missing.textContent = "Kein Plakat";
+      image.replaceWith(missing);
+    }, true);
 
     document.body.addEventListener("click", async (event) => {
       const button = event.target.closest("button");

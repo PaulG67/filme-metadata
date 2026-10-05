@@ -6,6 +6,7 @@ import time
 import httpx
 
 from app.identify import Candidate, norm_provider_ids
+from app.posters import tmdb_poster
 
 _TMDB_ID = re.compile(r"^\d{1,12}$")
 _IMDB_ID = re.compile(r"^tt\d{5,10}$")
@@ -70,6 +71,7 @@ class TmdbClient:
             provider_ids={"tmdb": str(row.get("id"))},
             overview=row.get("overview") or "",
             source="tmdb",
+            poster=tmdb_poster(row.get("poster_path")),
         )
 
     def _movie(self, row: dict) -> Candidate:
@@ -80,6 +82,7 @@ class TmdbClient:
             provider_ids={"tmdb": str(row.get("id"))},
             overview=row.get("overview") or "",
             source="tmdb",
+            poster=tmdb_poster(row.get("poster_path")),
         )
 
     def enrich(self, kind: str, candidate: Candidate) -> None:

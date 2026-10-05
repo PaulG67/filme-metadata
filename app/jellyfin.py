@@ -166,6 +166,21 @@ class JellyfinClient:
             raise JellyfinError("Eintrag nicht gefunden")
         return data
 
+    def primary_image(self, item_id: str) -> tuple[bytes, str] | None:
+        response = self.http.get(
+            f"{self.baseurl}/Items/{item_id}/Images/Primary",
+            headers=self.headers,
+            params={"maxWidth": "480", "quality": "90"},
+        )
+        if response.status_code == 404:
+            return None
+        if response.status_code >= 400:
+            raise JellyfinError(f"Plakat nicht lesbar ({response.status_code})")
+        content_type = (response.headers.get("content-type") or "image/jpeg").split(";", 1)[0].strip().lower()
+        if not content_type.startswith("image/") or not response.content:
+            return None
+        return response.content, content_type
+
     def static_stream_url(self, item_id: str) -> str:
         return f"{self.baseurl}/Videos/{item_id}/stream?Static=true"
 
@@ -309,5 +324,6 @@ def candidate_from_jellyfin(item: dict) -> Candidate:
         provider_ids=item.get("ProviderIds") or {},
         overview=item.get("Overview") or "",
         source="jellyfin",
+        poster=(item.get("ImageUrl") or "").strip(),
         raw=item,
     )

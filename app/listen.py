@@ -20,6 +20,7 @@ from app.excerpt import (
     sample_offsets,
 )
 from app.identify import candidate_key, jellyfin_provider_ids, norm_provider_ids
+from app.posters import poster_url
 from app.jellyfin import JellyfinClient, JellyfinError, candidate_from_jellyfin
 from app.opensubtitles import OpenSubtitles
 
@@ -468,6 +469,7 @@ def _candidate_from_hit(client: JellyfinClient, item_id: str, hit: dict, note: s
         "year": year,
         "provider_ids": display,
         "overview": "",
+        "poster": poster_url(mapped.poster) if raw else "",
         "source": "ausschnitt",
         "score": 1.0,
         "title_score": 1.0,
