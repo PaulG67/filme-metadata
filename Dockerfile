@@ -3,6 +3,7 @@ FROM python:3.12-slim
 LABEL org.opencontainers.image.title="filme-metadata"
 LABEL org.opencontainers.image.description="Erkennt falsche Jellyfin-Metadaten und korrigiert die Provider-ID"
 LABEL org.opencontainers.image.source="https://github.com/PaulG67/filme-metadata"
+LABEL net.unraid.docker.icon="https://raw.githubusercontent.com/PaulG67/filme-metadata/main/icon.svg"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
