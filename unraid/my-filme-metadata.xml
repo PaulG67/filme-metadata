@@ -16,7 +16,7 @@ Danach Docker - Container hinzufuegen - Template filme-metadata. API-Key muss ei
   <Category>MediaApp:Other Tools:Utilities</Category>
   <WebUI>http://[IP]:[PORT:8792]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/PaulG67/filme-metadata/main/unraid/my-filme-metadata.xml</TemplateURL>
-  <Icon>https://raw.githubusercontent.com/PaulG67/filme-metadata/main/icon.svg</Icon>
+  <Icon>https://raw.githubusercontent.com/PaulG67/filme-metadata/main/icon.png</Icon>
   <ExtraParams>--restart=unless-stopped</ExtraParams>
   <PostArgs/>
   <CPUset/>
