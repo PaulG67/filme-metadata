@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import logging
 
+from pathlib import Path
+
 from flask import Flask, jsonify, render_template, request, send_file
 
 from app.excerpt import ExcerptError
 from app.jellyfin import JellyfinError
 from app.plex import PlexError
 from app.scanner import Scanner
+from app.tmdb import external_links, lookup_title
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("filme-metadata")
@@ -33,6 +36,11 @@ def create_app() -> Flask:
     def index():
         return render_template("index.html")
 
+    @app.get("/icon.svg")
+    def icon():
+        path = Path(__file__).resolve().parents[1] / "icon.svg"
+        return send_file(path, mimetype="image/svg+xml", max_age=3600)
+
     @app.get("/api/status")
     def status():
         return jsonify(scanner.status())
@@ -51,6 +59,24 @@ def create_app() -> Flask:
         except RuntimeError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 409
         return jsonify({"ok": True})
+
+    @app.get("/api/title")
+    def title_detail():
+        from app.config import load_settings
+
+        kind = "movie" if request.args.get("kind") == "movie" else "series"
+        tmdb = str(request.args.get("tmdb") or "")
+        imdb = str(request.args.get("imdb") or "")
+        tvdb = str(request.args.get("tvdb") or "")
+        name = str(request.args.get("name") or "")[:180]
+        year = None
+        raw_year = str(request.args.get("year") or "")
+        if raw_year.isdigit():
+            year = int(raw_year)
+        try:
+            return jsonify(lookup_title(load_settings().tmdb_api_key, kind, tmdb, imdb, tvdb, name, year))
+        except RuntimeError as exc:
+            return jsonify({"ok": False, "error": str(exc), "links": external_links(kind, tmdb, imdb, tvdb)}), 400
 
     @app.get("/api/library")
     def library():

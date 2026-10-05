@@ -10,7 +10,7 @@ Beispiel: der Ordner heisst `Marvel's Inhumans (2017)`, Jellyfin zeigt **Hotel I
 | TMDB | 68716 | 276288 |
 | Staffel 1 | 8 Folgen | 13 Folgen |
 
-Die App schreibt nichts von selbst. In der Web-UI siehst du den Vorschlag und übernimmst ihn einzeln oder alle als sicher markierten Treffer.
+Die App schreibt nichts von selbst. In der Web-UI siehst du den Vorschlag und setzt ihn mit einem Button in Jellyfin, Plex oder beide. TMDB, IMDb und TVDB sind anklickbar: dann erscheinen Beschreibung, Besetzung und, mit TMDB-Key, der Trailer.
 
 ## So wird identifiziert
 
@@ -20,8 +20,8 @@ Der **Ordner** sagt, was du hast. Die **Provider-ID** sagt, welches Werk das ist
 2. **Film:** Ordner `Dune (2021)` schlägt den Dateinamen. So bleiben `Dune (1984)` und `Dune (2021)` getrennt. Eine Zahl im Titel wie `Blade Runner 2049` wird nicht als Erscheinungsjahr gelesen.
 3. **Folge:** `S01E03` oder `1x03` im Dateinamen. Der Folgentitel wird nicht zum Abgleich benutzt, weil er übersetzt oder abgeschnitten sein kann.
 4. **Vergleich mit Jellyfin:** weicht der angezeigte Titel ab oder liegt das Jahr mehr als ein Jahr daneben, ist der Eintrag verdächtig. Stimmt die vorhandene TMDB-, TVDB- oder IMDb-ID schon mit dem besten Treffer überein, bleibt er unangetastet.
-5. **Stimmt:** „Jellyfin stimmt“ oder „Plex stimmt“ speichert die aktuellen IDs und das Jahr. Derselbe Stand wird nicht wieder vorgeschlagen. Weicht die Zuordnung später ab, erscheint der Titel erneut.
-6. **Plex:** mit `PLEX_TOKEN` wird der gleiche Ordner in Plex gesucht. Steht dort ein anderes Werk, zeigt die Karte Jellyfin, Plex und den Vorschlag. Übernehmen gilt für Jellyfin, Plex oder beide. „Jellyfin nach Plex“ kopiert die Jellyfin-IDs, ohne Jellyfin zu ändern.
+5. **So lassen:** „Jellyfin so lassen“ oder „Plex so lassen“ speichert die aktuellen IDs und das Jahr. Derselbe Stand wird nicht wieder vorgeschlagen. Weicht die Zuordnung später ab, erscheint der Titel erneut.
+6. **Plex:** mit `PLEX_TOKEN` wird der gleiche Ordner in Plex gesucht. Steht dort ein anderes Werk, zeigt die Karte Jellyfin, Plex und den Vorschlag. Der Button nennt die Fassung und das System, zum Beispiel Jellyfin auf den Vorschlag setzen. „Plex auf den Jellyfin-Stand setzen“ kopiert die Jellyfin-IDs, ohne Jellyfin zu ändern.
 7. **Suche:** Jellyfin-Remote-Search mit dem Ordnernamen, einmal mit Jahr und einmal ohne. Mit optionalem TMDB-Key kommen Staffelfolgenzahlen und die fehlenden IDs dazu.
 8. **Bewertung jedes Treffers:**
    - Wörter, die im Ordner fehlen oder im Treffer zu viel sind („Hotel“ zusätzlich, „Marvel's“ fehlt)

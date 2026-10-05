@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>filme-metadata</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml" />
   <style>
     :root {
       --bg: #10141c;
@@ -41,7 +42,33 @@
     button { background: var(--accent); color: #0c1220; cursor: pointer; }
     button.secondary { background: #2a3548; color: var(--text); }
     button.ok { background: var(--ok); color: #062216; }
+    button { white-space: normal; }
     button:disabled, body.busy button[data-listen] { opacity: .55; cursor: progress; }
+    a.secondary {
+      display: inline-block;
+      flex: 0 0 auto;
+      background: #2a3548;
+      color: var(--text);
+      text-decoration: none;
+      border-radius: 8px;
+      padding: .55rem .85rem;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+    button.idlink {
+      background: transparent;
+      color: inherit;
+      padding: 0;
+      font-weight: 700;
+      text-decoration: underline;
+      text-underline-offset: .15em;
+    }
+    h1 img { width: 36px; height: 36px; vertical-align: -8px; margin-right: .4rem; border-radius: 8px; }
+    .detail-grid { display: grid; grid-template-columns: 132px 1fr; gap: .9rem; align-items: start; }
+    .detail-grid img { width: 132px; border-radius: 8px; background: #10141c; }
+    iframe.trailer { width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: 8px; background: #000; margin-top: .7rem; }
+    .idhint { margin: .45rem 0 0; font-size: .85rem; }
+    @media (max-width: 640px) { .detail-grid { grid-template-columns: 1fr; } .detail-grid img { width: 120px; } }
     input[type="search"] {
       width: 100%;
       background: var(--panel);
@@ -117,7 +144,7 @@
 </head>
 <body>
   <main>
-    <h1>filme-metadata</h1>
+    <h1><img src="/icon.svg" alt="" />filme-metadata</h1>
     <p class="sub">Die Liste zeigt nur Titel, bei denen sich etwas ändern würde. Oben kannst du trotzdem einen bestimmten Film, eine Serie oder eine Folge wählen.</p>
     <form class="search" id="searchForm">
       <label class="muted" for="query">Titel aus der Bibliothek</label>
@@ -129,15 +156,17 @@
     <div class="toolbar">
       <button type="button" id="testBtn" class="secondary">Verbindung</button>
       <button type="button" id="scanBtn">Bibliothek prüfen</button>
-      <button type="button" class="ok" id="sureBtn">Sichere übernehmen</button>
+      <button type="button" class="ok" id="sureBtn">Sichere Vorschläge schreiben</button>
     </div>
     <div class="bar" id="bar" hidden><span id="barFill"></span></div>
     <div id="notice" class="notice" hidden></div>
     <div id="errors" class="errors"></div>
     <section id="stage" class="card" hidden></section>
+    <section id="detail" class="card" hidden></section>
     <details>
       <summary>Kurz erklärt</summary>
-      <p>Die Liste enthält nur Titel, bei denen sich etwas ändern würde. „Stimmt“ merkt sich den jetzigen Stand, der erscheint erst wieder, wenn ID oder Jahr sich ändern.</p>
+      <p>Die Liste enthält nur Titel, bei denen sich etwas ändern würde. „So lassen“ merkt sich den jetzigen Stand, der erscheint erst wieder, wenn ID oder Jahr sich ändern.</p>
+      <p>TMDB, IMDb und TVDB sind anklickbar. Dann erscheinen Beschreibung, Besetzung und, wenn ein TMDB-Key gesetzt ist, der Trailer.</p>
       <p>„Ausschnitt erkennen“ zeigt zuerst etwa 20 Sekunden des Films. Danach läuft die Erkennung: Fingerabdruck, sonst der Dialog in diesem Ausschnitt. Dafür brauchst du einen OpenSubtitles-API-Key. Der erste Lauf lädt das Sprachmodell und dauert länger.</p>
     </details>
     <div id="list"></div>
@@ -363,7 +392,8 @@
         const cells = columns.map((column) => {
           const value = shown(fieldValue(column, label));
           const tone = column.key === "plex" ? "plex" : (column.key === "proposal" ? "after" : "before");
-          return `<td class="value ${tone}">${value ? esc(value) : '<span class="muted">—</span>'}</td>`;
+          const content = idButton(finding, column, label, value);
+          return `<td class="value ${tone}">${content}</td>`;
         }).join("");
         return `<tr class="changed"><td class="k">${esc(label)}</td>${cells}</tr>`;
       }).join("");
@@ -372,7 +402,21 @@
       return `<div class="compare-wrap"><table class="compare">
         <thead><tr><th></th>${head}</tr></thead>
         <tbody>${body}</tbody>
-      </table></div>`;
+      </table></div>
+      <p class="muted idhint">TMDB, IMDb oder TVDB antippen: Beschreibung, Besetzung und Trailer.</p>`;
+    }
+
+    function idButton(finding, column, label, value) {
+      if (!value) return '<span class="muted">—</span>';
+      if (label !== "TMDB" && label !== "IMDb" && label !== "TVDB") return esc(value);
+      const ids = column.ids || {};
+      return `<button type="button" class="idlink" data-title="1" data-kind="${finding.kind === "movie" ? "movie" : "series"}" data-name="${esc(column.name)}" data-year="${esc(column.year || "")}" data-tmdb="${esc(ids.Tmdb || "")}" data-imdb="${esc(ids.Imdb || "")}" data-tvdb="${esc(ids.Tvdb || "")}">${esc(value)}</button>`;
+    }
+
+    function setButton(target, title) {
+      if (target === "jellyfin,plex") return `Beide auf „${title}“ setzen`;
+      if (target === "plex") return `Plex auf „${title}“ setzen`;
+      return `Jellyfin auf „${title}“ setzen`;
     }
 
     function workLabel(name, year) {
@@ -417,29 +461,29 @@
           <strong>${esc(item.name)}${esc(yearOf(item.year))}</strong>
           <div class="muted">${esc(ids(item.provider_ids))}</div>
           <div class="row">
-            <button type="button" class="secondary" data-apply="${esc(finding.item_id)}" data-key="${esc(item.key)}" data-targets="jellyfin">Auf Jellyfin</button>
-            ${finding.plex && !finding.plex.accepted ? `<button type="button" class="secondary" data-apply="${esc(finding.item_id)}" data-key="${esc(item.key)}" data-targets="plex">Auf Plex</button>` : ""}
+            <button type="button" class="secondary" data-apply="${esc(finding.item_id)}" data-key="${esc(item.key)}" data-targets="jellyfin">${esc(setButton("jellyfin", workLabel(item.name, item.year)))}</button>
+            ${finding.plex && !finding.plex.accepted ? `<button type="button" class="secondary" data-apply="${esc(finding.item_id)}" data-key="${esc(item.key)}" data-targets="plex">${esc(setButton("plex", workLabel(item.name, item.year)))}</button>` : ""}
           </div>
         </div>
       `).join("");
       const buttons = [];
       if (proposal && !finding.jellyfin_accepted) {
-        buttons.push(`<button type="button" class="${proposal.auto ? "ok" : ""}" data-apply="${esc(finding.item_id)}" data-key="${esc(proposal.key)}" data-targets="jellyfin">Auf Jellyfin</button>`);
+        buttons.push(`<button type="button" class="${proposal.auto ? "ok" : ""}" data-apply="${esc(finding.item_id)}" data-key="${esc(proposal.key)}" data-targets="jellyfin">${esc(setButton("jellyfin", proposalLabel))}</button>`);
       }
       if (proposal && finding.plex && !finding.plex.accepted) {
-        buttons.push(`<button type="button" class="secondary" data-apply="${esc(finding.item_id)}" data-key="${esc(proposal.key)}" data-targets="plex">Auf Plex</button>`);
+        buttons.push(`<button type="button" class="secondary" data-apply="${esc(finding.item_id)}" data-key="${esc(proposal.key)}" data-targets="plex">${esc(setButton("plex", proposalLabel))}</button>`);
       }
       if (proposal && finding.plex && !finding.jellyfin_accepted && !finding.plex.accepted) {
-        buttons.push(`<button type="button" class="ok" data-apply="${esc(finding.item_id)}" data-key="${esc(proposal.key)}" data-targets="jellyfin,plex">Auf beide</button>`);
+        buttons.push(`<button type="button" class="ok" data-apply="${esc(finding.item_id)}" data-key="${esc(proposal.key)}" data-targets="jellyfin,plex">${esc(setButton("jellyfin,plex", proposalLabel))}</button>`);
       }
       if (finding.plex && !finding.plex.accepted && sidesDiffer(finding)) {
-        buttons.push(`<button type="button" class="secondary" data-apply="${esc(finding.item_id)}" data-key="side:jellyfin" data-targets="plex">Jellyfin nach Plex</button>`);
+        buttons.push(`<button type="button" class="secondary" data-apply="${esc(finding.item_id)}" data-key="side:jellyfin" data-targets="plex">Plex auf den Jellyfin-Stand setzen</button>`);
       }
       if (finding.plex && !finding.jellyfin_accepted && sidesDiffer(finding)) {
-        buttons.push(`<button type="button" class="secondary" data-apply="${esc(finding.item_id)}" data-key="side:plex" data-targets="jellyfin">Plex nach Jellyfin</button>`);
+        buttons.push(`<button type="button" class="secondary" data-apply="${esc(finding.item_id)}" data-key="side:plex" data-targets="jellyfin">Jellyfin auf den Plex-Stand setzen</button>`);
       }
-      if (!finding.jellyfin_accepted) buttons.push(`<button type="button" class="secondary" data-accept="${esc(finding.item_id)}" data-system="jellyfin">Jellyfin stimmt</button>`);
-      if (finding.plex && !finding.plex.accepted) buttons.push(`<button type="button" class="secondary" data-accept="${esc(finding.item_id)}" data-system="plex">Plex stimmt</button>`);
+      if (!finding.jellyfin_accepted) buttons.push(`<button type="button" class="secondary" data-accept="${esc(finding.item_id)}" data-system="jellyfin">Jellyfin so lassen</button>`);
+      if (finding.plex && !finding.plex.accepted) buttons.push(`<button type="button" class="secondary" data-accept="${esc(finding.item_id)}" data-system="plex">Plex so lassen</button>`);
       if (finding.excerpt_clip) {
         buttons.push(`<button type="button" class="secondary" data-showclip="${esc(finding.item_id)}" data-cliptoken="${esc(finding.excerpt_offset || 0)}" data-cliplabel="${esc(finding.excerpt_label || "Filmausschnitt")}">Ausschnitt ansehen</button>`);
       }
@@ -459,6 +503,7 @@
           ${finding.excerpt_transcript ? `<div class="muted">Gehört: „${esc(finding.excerpt_transcript)}“</div>` : ""}
           ${episodeRows(finding)}
           ${others}
+          <p class="muted idhint">Ein Setzen-Button schreibt die genannte Fassung in das genannte System. Vorher bleibt alles unverändert. „So lassen“ schlägt den jetzigen Stand nicht wieder vor.</p>
           <div class="row">${buttons.join("")}</div>
         </article>
       `;
@@ -471,7 +516,7 @@
         return;
       }
       const groups = [
-        ["Sicher", findings.filter((item) => item.status === "sure"), "Diese schreibt „Sichere übernehmen“. Markierte Angaben bleiben."],
+        ["Sicher", findings.filter((item) => item.status === "sure"), "Diese Vorschläge schreibt der grüne Button oben. Markierte Angaben bleiben."],
         ["Plex weicht ab", findings.filter((item) => item.status === "split"), "Wähle, welches System die Angaben übernimmt."],
         ["Prüfen", findings.filter((item) => item.status !== "sure" && item.status !== "split"), "Noch nicht eindeutig. Nichts wird automatisch geschrieben."]
       ];
@@ -599,7 +644,7 @@
       load();
     };
     document.getElementById("sureBtn").onclick = async () => {
-      if (!confirm("Sichere Anpassungen jetzt schreiben? Jellyfin immer, Plex nur bei einem anderen Treffer.")) return;
+      if (!confirm("Sichere Vorschläge jetzt schreiben? Jellyfin immer, Plex nur bei einem anderen Treffer.")) return;
       showNotice("Schreibe sichere Anpassungen…", "busy");
       const data = await post("/api/apply-sure");
       if (data) showNotice(data.applied && data.applied.length ? ("Übernommen: " + data.applied.join(", ")) : "Nichts Sicheres offen", data.applied && data.applied.length ? "ok" : "");
@@ -629,9 +674,85 @@
         }
       }, 250);
     };
+    function linkRow(links) {
+      const labels = { tmdb: "Bei TMDB öffnen", imdb: "Bei IMDb öffnen", tvdb: "Bei TVDB öffnen" };
+      return `<div class="row">${Object.entries(links || {}).map(([key, href]) => `<a class="secondary" href="${esc(href)}" target="_blank" rel="noopener">${labels[key] || "Öffnen"}</a>`).join("")}</div>`;
+    }
+
+    function renderDetail(data) {
+      const box = document.getElementById("detail");
+      const name = data.name || "Titel";
+      const year = data.year ? ` (${data.year})` : "";
+      const facts = [];
+      if (data.genres && data.genres.length) facts.push(data.genres.join(", "));
+      if (data.runtime) facts.push(`${data.runtime} Min.`);
+      if (data.seasons) facts.push(data.seasons === 1 ? "1 Staffel" : `${data.seasons} Staffeln`);
+      if (data.cast && data.cast.length) facts.push(data.cast.join(", "));
+      const original = data.original && data.original !== data.name ? `<div class="muted">Original: ${esc(data.original)}</div>` : "";
+      const poster = data.poster ? `<img src="${esc(data.poster)}" alt="" />` : "";
+      const factsBlock = `
+        ${original}
+        ${facts.length ? `<p>${esc(facts.join(" · "))}</p>` : ""}
+        ${data.overview ? `<p>${esc(data.overview)}</p>` : ""}
+        ${linkRow(data.links)}
+      `;
+      const trailer = data.trailer
+        ? `<iframe class="trailer" title="Trailer" src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(data.trailer)}" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>`
+        : `<p class="muted">${esc(data.hint || "Kein Trailer hinterlegt.")}</p>`;
+      box.hidden = false;
+      box.innerHTML = `
+        <div class="row" style="justify-content: space-between;">
+          <h2 style="margin:0;">${esc(name)}${esc(year)}</h2>
+          <button type="button" class="secondary" id="clearDetail">Schließen</button>
+        </div>
+        ${poster ? `<div class="detail-grid">${poster}<div>${factsBlock}</div></div>` : factsBlock}
+        ${trailer}
+      `;
+    }
+
+    async function openTitle(button) {
+      const box = document.getElementById("detail");
+      const name = button.dataset.name || "Titel";
+      const year = button.dataset.year ? ` (${button.dataset.year})` : "";
+      box.hidden = false;
+      box.innerHTML = `<h2>${esc(name)}${esc(year)}</h2><p class="muted">Lade Beschreibung und Trailer…</p>`;
+      box.scrollIntoView({ behavior: "smooth", block: "center" });
+      const params = new URLSearchParams({
+        kind: button.dataset.kind || "movie",
+        tmdb: button.dataset.tmdb || "",
+        imdb: button.dataset.imdb || "",
+        tvdb: button.dataset.tvdb || "",
+        name,
+        year: button.dataset.year || ""
+      });
+      try {
+        const response = await fetch("/api/title?" + params.toString());
+        const data = await response.json();
+        if (!response.ok || data.ok === false) {
+          box.innerHTML = `<h2>${esc(name)}${esc(year)}</h2><p class="notice bad">${esc(data.error || "Angaben nicht geladen")}</p>${linkRow(data.links)}<button type="button" class="secondary" id="clearDetail">Schließen</button>`;
+          return;
+        }
+        if (!data.name) data.name = name;
+        if (!data.year && button.dataset.year) data.year = button.dataset.year;
+        renderDetail(data);
+      } catch {
+        box.innerHTML = `<h2>${esc(name)}${esc(year)}</h2><p>Angaben nicht geladen.</p><button type="button" class="secondary" id="clearDetail">Schließen</button>`;
+      }
+    }
+
     document.body.addEventListener("click", async (event) => {
       const button = event.target.closest("button");
       if (!button || busy && !button.dataset.listen) return;
+      if (button.id === "clearDetail") {
+        const box = document.getElementById("detail");
+        box.hidden = true;
+        box.innerHTML = "";
+        return;
+      }
+      if (button.dataset.title) {
+        await openTitle(button);
+        return;
+      }
       if (button.id === "clearPick") {
         picked = null;
         renderPick();

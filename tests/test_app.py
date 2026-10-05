@@ -56,6 +56,42 @@ def test_clip_route_serves_only_a_local_preview(monkeypatch, tmp_path):
     assert client.get("/api/clip/abcd").status_code == 404
 
 
+def test_pick_trailer_prefers_an_official_german_trailer():
+    from app.tmdb import clean_provider_id, pick_trailer
+
+    key = pick_trailer([
+        {"site": "YouTube", "type": "Trailer", "key": "english1", "iso_639_1": "en", "official": True},
+        {"site": "YouTube", "type": "Trailer", "key": "german01", "iso_639_1": "de", "official": True},
+        {"site": "Vimeo", "type": "Trailer", "key": "vimeo123", "official": True},
+        {"site": "YouTube", "type": "Teaser", "key": "teaser01", "iso_639_1": "de", "official": True},
+    ])
+    assert key == "german01"
+    assert clean_provider_id("imdb", "4154858") == "tt4154858"
+    assert clean_provider_id("tmdb", "68716") == "68716"
+    assert clean_provider_id("tmdb", "../etc") == ""
+
+
+def test_title_lookup_without_key_still_offers_links(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("TMDB_API_KEY", "")
+    from app.main import create_app
+
+    client = create_app().test_client()
+    response = client.get("/api/title?kind=series&tmdb=68716&imdb=tt4154858&tvdb=328844&name=Inhumans&year=2017")
+    data = response.get_json()
+    assert response.status_code == 200
+    assert data["ok"] is True
+    assert data["trailer"] is None
+    assert "TMDB-API-Key" in data["hint"]
+    assert data["links"]["tmdb"] == "https://www.themoviedb.org/tv/68716"
+    assert data["links"]["imdb"] == "https://www.imdb.com/title/tt4154858"
+    assert data["links"]["tvdb"] == "https://www.thetvdb.com/dereferrer/series/328844"
+    icon = client.get("/icon.svg")
+    assert icon.status_code == 200
+    assert icon.mimetype == "image/svg+xml"
+    assert b"<svg" in icon.data
+
+
 def test_health(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     from app.main import create_app
