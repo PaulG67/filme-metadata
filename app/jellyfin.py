@@ -103,7 +103,7 @@ class JellyfinClient:
                 {
                     "Recursive": "true",
                     "IncludeItemTypes": "Series,Movie",
-                    "Fields": "ProviderIds,Path,ProductionYear,OriginalTitle,PremiereDate",
+                    "Fields": "ProviderIds,Path,ProductionYear,OriginalTitle,PremiereDate,Overview",
                     "StartIndex": str(start),
                     "Limit": "200",
                 },

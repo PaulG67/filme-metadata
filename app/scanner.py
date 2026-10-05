@@ -286,6 +286,8 @@ class Scanner:
         finding["kind"] = kind
         finding["path"] = path
         finding["episode_count"] = len(episodes)
+        finding["jellyfin_overview"] = (item.get("Overview") or "").strip()[:400]
+        finding["jellyfin_original"] = (item.get("OriginalTitle") or "").strip()
         return finding, "finding"
 
     def _store_listen(self, item_id: str, payload: dict) -> None:

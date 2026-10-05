@@ -23,7 +23,7 @@
       background: radial-gradient(1000px 480px at 0% -10%, #243044, var(--bg));
       color: var(--text);
     }
-    main { max-width: 980px; margin: 0 auto; padding: 2rem 1.1rem 4rem; }
+    main { max-width: 1100px; margin: 0 auto; padding: 2rem 1.1rem 4rem; }
     h1 { margin: 0 0 .3rem; font-size: 1.7rem; }
     h2 { margin: 1.4rem 0 .6rem; font-size: 1.05rem; }
     p { line-height: 1.45; }
@@ -77,6 +77,16 @@
     .notes { margin: .35rem 0 .5rem; padding-left: 1.1rem; color: var(--muted); }
     .score { font-variant-numeric: tabular-nums; color: var(--accent); }
     .empty { padding: 1.4rem; text-align: center; color: var(--muted); border: 1px dashed var(--line); border-radius: 12px; }
+    .section-note { margin: .2rem 0 .8rem; }
+    .compare-wrap { overflow-x: auto; margin-top: .8rem; }
+    table.compare { width: 100%; border-collapse: collapse; font-size: .92rem; }
+    table.compare th { text-align: left; color: var(--muted); font-size: .75rem; font-weight: 650; letter-spacing: .03em; padding: .2rem .45rem .45rem; }
+    table.compare td { vertical-align: top; padding: .45rem; border-top: 1px solid var(--line); }
+    table.compare td.k { color: var(--muted); width: 7.2rem; white-space: nowrap; }
+    table.compare tr.changed td.value { background: color-mix(in srgb, var(--warn) 10%, transparent); }
+    h3 .before, table.compare .before { color: #fecaca; }
+    h3 .after, table.compare .after { color: #bbf7d0; }
+    .arrow { color: var(--muted); padding: 0 .25rem; }
     #toast { color: var(--muted); }
     .bar { height: 8px; background: #101722; border-radius: 99px; overflow: hidden; margin: .4rem 0 .8rem; }
     .bar span { display: block; height: 100%; background: var(--accent); width: 0; }
@@ -101,7 +111,6 @@
       <p><strong>Ausschnitt erkennen</strong> liest den Film selbst, nicht den Dateinamen. Zuerst den Fingerabdruck der Datei bei OpenSubtitles. Trifft der nicht, werden 20 Sekunden Dialog mitgeschnitten und mit den Untertiteln der möglichen Filme verglichen. Dafür brauchst du einen kostenlosen OpenSubtitles-API-Key, für den Dialog zusätzlich Benutzername und Passwort. Beim ersten Mal lädt das Sprachmodell in den Appdata-Ordner.</p>
     </details>
     <div id="errors" class="muted"></div>
-    <h2 id="listTitle">Abweichungen</h2>
     <div id="list"></div>
   </main>
   <script>
@@ -174,51 +183,134 @@
       if (data.error) toast.textContent = data.error;
     }
 
+    function shown(value) {
+      if (value === null || value === undefined || value === "") return "";
+      return String(value);
+    }
+
+    function pad(value) {
+      if (value === null || value === undefined || value === "") return "?";
+      return String(value).padStart(2, "0");
+    }
+
+    function metaRows(finding, candidate) {
+      const beforeIds = finding.jellyfin_ids || {};
+      const afterIds = (candidate && candidate.provider_ids) || {};
+      const rows = [
+        ["Titel", finding.jellyfin_name, candidate && candidate.name],
+        ["Jahr", finding.jellyfin_year, candidate && candidate.year],
+        ["Originaltitel", finding.jellyfin_original, candidate && candidate.original_name],
+        ["TMDB", beforeIds.Tmdb, afterIds.Tmdb],
+        ["IMDb", beforeIds.Imdb, afterIds.Imdb],
+        ["TVDB", beforeIds.Tvdb, afterIds.Tvdb],
+        ["Beschreibung", finding.jellyfin_overview, candidate && candidate.overview]
+      ];
+      return rows.filter((row) => {
+        if (!(shown(row[1]) || shown(row[2]))) return false;
+        if (row[0] === "Originaltitel") {
+          const title = rows[0];
+          if (shown(row[1]) === shown(title[1]) && shown(row[2]) === shown(title[2])) return false;
+        }
+        return true;
+      });
+    }
+
+    function compareTable(finding, candidate, afterHeading) {
+      const body = metaRows(finding, candidate).map(([label, before, after]) => {
+        const changed = shown(before) !== shown(after);
+        return `<tr class="${changed ? "changed" : ""}">
+          <td class="k">${esc(label)}</td>
+          <td class="value before">${shown(before) ? esc(before) : '<span class="muted">—</span>'}</td>
+          <td class="value after">${shown(after) ? esc(after) : '<span class="muted">—</span>'}</td>
+        </tr>`;
+      }).join("");
+      return `<div class="compare-wrap"><table class="compare">
+        <thead><tr><th></th><th>Vorher in Jellyfin</th><th>${esc(afterHeading)}</th></tr></thead>
+        <tbody>${body}</tbody>
+      </table></div>`;
+    }
+
+    function episodeRows(finding) {
+      const issues = finding.episode_issues || [];
+      if (!issues.length) return "";
+      const body = issues.slice(0, 12).map((issue) => `
+        <tr class="changed">
+          <td class="k">${esc(issue.name || "Folge")}</td>
+          <td class="value before">S${pad(issue.jellyfin_season)}E${pad(issue.jellyfin_episode)}</td>
+          <td class="value after">S${pad(issue.expected_season)}E${pad(issue.expected_episode)}
+            <button type="button" class="secondary" data-episode="${esc(issue.item_id)}">Index setzen</button>
+          </td>
+        </tr>
+      `).join("");
+      return `<div class="compare-wrap"><table class="compare">
+        <thead><tr><th>Folge</th><th>Vorher</th><th>Nachher aus Dateiname</th></tr></thead>
+        <tbody>${body}</tbody>
+      </table></div>`;
+    }
+
+    function changeCard(finding) {
+      const candidate = (finding.candidates || [])[0] || null;
+      const afterHeading = finding.status === "sure" ? "Nachher" : "Vorschlag";
+      const before = `${finding.jellyfin_name || "ohne Titel"}${yearOf(finding.jellyfin_year)}`;
+      const after = candidate ? `${candidate.name || "ohne Titel"}${yearOf(candidate.year)}` : "kein Treffer";
+      const others = (finding.candidates || []).slice(1).map((item) => `
+        <div class="candidate">
+          <strong>${esc(item.name)}${esc(yearOf(item.year))}</strong>
+          <span class="score">${Math.round((item.score || 0) * 100)}%</span>
+          <div class="muted">${esc(ids(item.provider_ids))}</div>
+          <button type="button" class="secondary" data-apply="${esc(finding.item_id)}" data-key="${esc(item.key)}">Diesen Treffer übernehmen</button>
+        </div>
+      `).join("");
+      const primaryButton = candidate
+        ? `<button type="button" class="${candidate.auto ? "ok" : "secondary"}" data-apply="${esc(finding.item_id)}" data-key="${esc(candidate.key)}">Nachher übernehmen</button>`
+        : "";
+      return `
+        <article class="card">
+          <h3>
+            <span class="badge kind">${kindLabel(finding.kind)}</span>
+            <span class="badge ${esc(finding.status)}">${statusLabel(finding.status)}</span>
+            <span class="before">${esc(before)}</span>
+            <span class="arrow">→</span>
+            <span class="after">${esc(after)}</span>
+          </h3>
+          <div class="muted">${esc(finding.reason || "")}</div>
+          <div class="path">${esc(finding.path || "")}</div>
+          ${compareTable(finding, candidate, afterHeading)}
+          ${(candidate && candidate.notes || []).length ? `<ul class="notes">${candidate.notes.map((note) => `<li>${esc(note)}</li>`).join("")}</ul>` : ""}
+          ${finding.excerpt_transcript ? `<div class="muted">Gehört: „${esc(finding.excerpt_transcript)}“</div>` : ""}
+          ${episodeRows(finding)}
+          ${others}
+          <div class="row">
+            ${primaryButton}
+            <button type="button" class="secondary" data-listen="${esc(finding.item_id)}">Ausschnitt erkennen</button>
+            <button type="button" class="secondary" data-ignore="${esc(finding.item_id)}">Ignorieren</button>
+          </div>
+        </article>
+      `;
+    }
+
     function renderList(data) {
       const findings = data.findings || [];
       if (!findings.length) {
-        list.innerHTML = `<div class="empty">${data.running ? "Scan läuft." : "Keine Abweichung geladen. „Bibliothek prüfen“ vergleicht Ordnernamen und Jahr mit dem, was Jellyfin anzeigt."}</div>`;
+        list.innerHTML = `<div class="empty">${data.running ? "Scan läuft." : "Keine Änderung geladen. „Bibliothek prüfen“ zeigt danach, welche Titel andere Metadaten bekommen würden."}</div>`;
         return;
       }
-      list.innerHTML = findings.map((finding) => {
-        const candidates = (finding.candidates || []).map((candidate) => `
-          <div class="candidate">
-            <strong>${esc(candidate.name)}${esc(yearOf(candidate.year))}</strong>
-            <span class="score">${Math.round((candidate.score || 0) * 100)}%</span>
-            ${candidate.auto ? '<span class="badge sure">Vorschlag</span>' : ""}
-            <div class="muted">${esc(ids(candidate.provider_ids))}</div>
-            <ul class="notes">${(candidate.notes || []).map((note) => `<li>${esc(note)}</li>`).join("")}</ul>
-            <button type="button" class="${candidate.auto ? "ok" : "secondary"}" data-apply="${esc(finding.item_id)}" data-key="${esc(candidate.key)}">Übernehmen</button>
-          </div>
-        `).join("");
-        const issues = (finding.episode_issues || []).map((issue) => `
-          <div class="candidate">
-            <div>Datei S${String(issue.expected_season).padStart(2, "0")}E${String(issue.expected_episode).padStart(2, "0")}, Jellyfin S${issue.jellyfin_season ?? "?"}E${issue.jellyfin_episode ?? "?"}</div>
-            <div class="path">${esc(issue.path)}</div>
-            <button type="button" class="secondary" data-episode="${esc(issue.item_id)}">Index aus Dateiname setzen</button>
-          </div>
-        `).join("");
-        return `
-          <article class="card">
-            <h3>
-              <span class="badge kind">${kindLabel(finding.kind)}</span>
-              <span class="badge ${esc(finding.status)}">${statusLabel(finding.status)}</span>
-              ${esc(finding.folder_title)}${esc(yearOf(finding.folder_year))}
-            </h3>
-            <div class="swap">Jellyfin zeigt <span class="from">${esc(finding.jellyfin_name)}${esc(yearOf(finding.jellyfin_year))}</span></div>
-            <div class="muted">${esc(finding.reason)}</div>
-            <div class="path">${esc(finding.path)}</div>
-            ${finding.episode_count ? `<div class="muted">${finding.episode_count} Folgen aus Dateinamen gelesen</div>` : ""}
-            ${finding.excerpt_transcript ? `<div class="muted">Gehört: „${esc(finding.excerpt_transcript)}“</div>` : ""}
-            ${candidates || '<p class="muted">Kein passender Treffer. Ordnername oder Jahr prüfen.</p>'}
-            ${issues}
-            <div class="row">
-              <button type="button" class="secondary" data-listen="${esc(finding.item_id)}">Ausschnitt erkennen</button>
-              <button type="button" class="secondary" data-ignore="${esc(finding.item_id)}">Ignorieren</button>
-            </div>
-          </article>
-        `;
-      }).join("");
+      const sure = findings.filter((item) => item.status === "sure");
+      const review = findings.filter((item) => item.status !== "sure");
+      const blocks = [];
+      blocks.push(`<h2>Geplante Änderungen</h2>`);
+      if (sure.length) {
+        blocks.push(`<p class="section-note muted">${sure.length} ${sure.length === 1 ? "Titel wird" : "Titel werden"} mit „Alle sicheren übernehmen“ geschrieben. Der Scan selbst ändert Jellyfin nicht.</p>`);
+        blocks.push(sure.map(changeCard).join(""));
+      } else {
+        blocks.push(`<p class="section-note muted">Keine sichere Änderung. Unten stehen nur Vorschläge.</p>`);
+      }
+      if (review.length) {
+        blocks.push(`<h2>Zur Prüfung</h2>`);
+        blocks.push(`<p class="section-note muted">Der beste Treffer ist nicht eindeutig. „Nachher“ ist der Vorschlag, nicht eine automatische Änderung.</p>`);
+        blocks.push(review.map(changeCard).join(""));
+      }
+      list.innerHTML = blocks.join("");
     }
 
     async function post(url, body, waiting) {
