@@ -6,9 +6,25 @@ import httpx
 
 from app.identify import Candidate
 
-AUTH_HEADER = (
-    'MediaBrowser Client="filme-metadata", Device="unraid", DeviceId="filme-metadata", Version="1.0.0"'
-)
+
+def clean_token(value: str) -> str:
+    token = (value or "").strip()
+    if len(token) >= 2 and token[0] == token[-1] and token[0] in "\"'":
+        token = token[1:-1].strip()
+    return token.replace("\r", "").replace("\n", "")
+
+
+def authorization_header(token: str = "") -> str:
+    parts = [
+        'Client="filme-metadata"',
+        'Device="unraid"',
+        'DeviceId="filme-metadata"',
+        'Version="1.0.0"',
+    ]
+    token = clean_token(token)
+    if token:
+        parts.append(f'Token="{token}"')
+    return "MediaBrowser " + ", ".join(parts)
 
 
 class JellyfinError(RuntimeError):
@@ -18,21 +34,21 @@ class JellyfinError(RuntimeError):
 class JellyfinClient:
     def __init__(self, baseurl: str, token: str, verify: bool) -> None:
         self.baseurl = baseurl.rstrip("/")
-        self.token = token
+        self.token = clean_token(token)
         self.headers = {
-            "Authorization": AUTH_HEADER,
-            "X-Emby-Authorization": AUTH_HEADER,
+            "Authorization": authorization_header(self.token),
             "Accept": "application/json",
         }
-        if token:
-            self.headers["X-Emby-Token"] = token
-            self.headers["X-Emby-Authorization"] = f'{AUTH_HEADER}, Token="{token}"'
         self.http = httpx.Client(timeout=60, verify=verify, follow_redirects=True)
+
+    def ffmpeg_headers(self) -> str:
+        return f"Authorization: {authorization_header(self.token)}\r\n"
 
     @classmethod
     def connect(cls, baseurl: str, token: str, username: str, password: str, verify: bool) -> JellyfinClient:
         if not baseurl:
             raise JellyfinError("JELLYFIN_BASEURL fehlt")
+        token = clean_token(token)
         if token:
             return cls(baseurl, token, verify)
         if not username:
@@ -43,8 +59,7 @@ class JellyfinClient:
     @staticmethod
     def login(baseurl: str, username: str, password: str, verify: bool) -> str:
         headers = {
-            "Authorization": AUTH_HEADER,
-            "X-Emby-Authorization": AUTH_HEADER,
+            "Authorization": authorization_header(),
             "Accept": "application/json",
             "Content-Type": "application/json",
         }
@@ -77,6 +92,11 @@ class JellyfinClient:
             if response.status_code >= 500 and attempt < 2:
                 time.sleep(0.4 * (attempt + 1))
                 continue
+            if response.status_code == 401:
+                raise JellyfinError(
+                    "Jellyfin lehnt den API-Key ab (401). "
+                    "Im Dashboard unter API-Keys einen Schlüssel anlegen und nur diesen Wert eintragen."
+                )
             if response.status_code >= 400:
                 detail = response.text[:300].replace("\n", " ")
                 raise JellyfinError(f"{method} {path} -> {response.status_code} {detail}")

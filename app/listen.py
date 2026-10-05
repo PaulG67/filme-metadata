@@ -166,7 +166,7 @@ def _extract_wav(client: JellyfinClient, item_id: str, offset: int, seconds: int
         "-t",
         str(seconds),
         "-headers",
-        f"X-Emby-Token: {token}\r\n",
+        client.ffmpeg_headers(),
         "-i",
         client.static_stream_url(item_id),
         "-vn",

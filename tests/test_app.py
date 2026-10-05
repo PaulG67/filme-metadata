@@ -1,3 +1,4 @@
+from app.jellyfin import JellyfinClient
 from app.scanner import _apply_body
 
 
@@ -25,6 +26,18 @@ def test_apply_body_builds_result_from_tmdb_candidate():
     assert body["Name"] == "Marvel's Inhumans"
     assert body["ProviderIds"]["Tmdb"] == "68716"
     assert body["SearchProviderName"] == "TheMovieDb"
+
+
+def test_api_key_goes_in_authorization_header():
+    client = JellyfinClient("http://127.0.0.1:9", ' "abc123" ', verify=False)
+    assert client.token == "abc123"
+    assert client.headers["Authorization"] == (
+        'MediaBrowser Client="filme-metadata", Device="unraid", '
+        'DeviceId="filme-metadata", Version="1.0.0", Token="abc123"'
+    )
+    assert "X-Emby-Token" not in client.headers
+    assert 'Token="abc123"' in client.ffmpeg_headers()
+    client.http.close()
 
 
 def test_health(monkeypatch, tmp_path):
