@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>filme-metadata</title>
+  <style>
+    :root {
+      --bg: #10141c;
+      --panel: #1a2130;
+      --text: #e7eef8;
+      --muted: #93a0b5;
+      --line: #2c384c;
+      --accent: #7aa2ff;
+      --ok: #3ecf8e;
+      --warn: #f0c14a;
+      --bad: #f07178;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: radial-gradient(1000px 480px at 0% -10%, #243044, var(--bg));
+      color: var(--text);
+    }
+    main { max-width: 980px; margin: 0 auto; padding: 2rem 1.1rem 4rem; }
+    h1 { margin: 0 0 .3rem; font-size: 1.7rem; }
+    h2 { margin: 1.4rem 0 .6rem; font-size: 1.05rem; }
+    p { line-height: 1.45; }
+    .sub, .muted { color: var(--muted); }
+    .row { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; margin: .9rem 0; }
+    button, .chip {
+      border: 0;
+      border-radius: 8px;
+      padding: .55rem .85rem;
+      font-weight: 650;
+    }
+    button { background: var(--accent); color: #0c1220; cursor: pointer; }
+    button.secondary { background: #334155; color: var(--text); }
+    button.ok { background: var(--ok); color: #062216; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .chip {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .card, .explain, details {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+    }
+    .explain, details { padding: .9rem 1rem; margin: .8rem 0 1rem; }
+    details summary { cursor: pointer; font-weight: 650; }
+    .card { padding: 1rem 1.05rem; margin-bottom: .75rem; }
+    .card h3 { margin: 0 0 .35rem; font-size: 1.05rem; display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; }
+    .badge {
+      display: inline-block;
+      border-radius: 999px;
+      padding: .12rem .5rem;
+      font-size: .75rem;
+      font-weight: 700;
+    }
+    .badge.sure { background: color-mix(in srgb, var(--ok) 25%, transparent); color: #b6f3d4; }
+    .badge.review { background: color-mix(in srgb, var(--warn) 22%, transparent); color: #f8e3a3; }
+    .badge.no_match { background: color-mix(in srgb, var(--bad) 25%, transparent); color: #fecaca; }
+    .badge.kind { background: #243044; color: #d5e2ff; }
+    .swap { margin: .2rem 0 .45rem; }
+    .swap .from { color: var(--bad); }
+    .swap .to { color: var(--ok); }
+    .path { font-family: ui-monospace, Consolas, monospace; font-size: .78rem; color: var(--muted); word-break: break-all; }
+    .candidate {
+      border-top: 1px solid var(--line);
+      padding-top: .7rem;
+      margin-top: .7rem;
+    }
+    .notes { margin: .35rem 0 .5rem; padding-left: 1.1rem; color: var(--muted); }
+    .score { font-variant-numeric: tabular-nums; color: var(--accent); }
+    .empty { padding: 1.4rem; text-align: center; color: var(--muted); border: 1px dashed var(--line); border-radius: 12px; }
+    #toast { color: var(--muted); }
+    .bar { height: 8px; background: #101722; border-radius: 99px; overflow: hidden; margin: .4rem 0 .8rem; }
+    .bar span { display: block; height: 100%; background: var(--accent); width: 0; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>filme-metadata</h1>
+    <p class="sub">Findet Serien und Filme, die Jellyfin der falschen TMDB-ID zugeordnet hat, und setzt die richtige ID.</p>
+    <div class="row" id="meta"></div>
+    <div class="bar" id="bar" hidden><span id="barFill"></span></div>
+    <div class="row">
+      <button type="button" id="testBtn">Verbindung prüfen</button>
+      <button type="button" id="scanBtn">Bibliothek prüfen</button>
+      <button type="button" class="ok" id="sureBtn">Alle sicheren übernehmen</button>
+      <span id="toast"></span>
+    </div>
+    <details>
+      <summary>So wird ein Film, eine Serie und eine Folge erkannt</summary>
+      <p>Der Ordner ist die Absicht, die Provider-ID die Identität. <strong>Marvel's Inhumans</strong> (2017, TMDB 68716, 8 Folgen) und <strong>Hotel Inhumans</strong> (2025, TMDB 276288, 13 Folgen) teilen sich nur das Wort Inhumans. Jellyfin übernimmt oft den ersten Suchtreffer.</p>
+      <p>Die App liest Titel und Jahr aus dem Ordner, Staffel und Episode aus <code>S01E03</code> im Dateinamen. Eine ID im Ordner wie <code>{tvdb-328844}</code> gilt sofort. Danach sucht sie über die in Jellyfin eingerichteten Anbieter und bewertet jeden Treffer: fehlende und zusätzliche Wörter, Jahr, und ob die lokalen Folgen in diese Staffel passen. Nur ein klarer Abstand wird als sicher markiert. Übernehmen schreibt die IDs nach Jellyfin und lädt Metadaten neu. Der Gesehen-Status bleibt.</p>
+    </details>
+    <div id="errors" class="muted"></div>
+    <h2 id="listTitle">Abweichungen</h2>
+    <div id="list"></div>
+  </main>
+  <script>
+    const toast = document.getElementById("toast");
+    const list = document.getElementById("list");
+    let polling = null;
+
+    function esc(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      }[ch]));
+    }
+
+    function kindLabel(kind) {
+      return kind === "movie" ? "Film" : "Serie";
+    }
+
+    function statusLabel(status) {
+      if (status === "sure") return "Sicher";
+      if (status === "no_match") return "Kein Treffer";
+      return "Prüfen";
+    }
+
+    function yearOf(value) {
+      return value ? ` (${value})` : "";
+    }
+
+    function ids(map) {
+      return Object.entries(map || {}).map(([key, value]) => `${key} ${value}`).join(" · ");
+    }
+
+    async function load() {
+      const response = await fetch("/api/status");
+      const data = await response.json();
+      renderMeta(data);
+      renderList(data);
+      if (data.running && !polling) polling = setInterval(load, 1200);
+      if (!data.running && polling) {
+        clearInterval(polling);
+        polling = null;
+      }
+      document.getElementById("scanBtn").disabled = data.running;
+      document.getElementById("sureBtn").disabled = data.running;
+    }
+
+    function renderMeta(data) {
+      const stats = data.stats || {};
+      const bits = [
+        data.server_name || data.config.jellyfin_baseurl,
+        data.config.tmdb ? "TMDB zusätzlich" : "nur Jellyfin-Suche",
+        data.running ? data.message : (data.finished_at ? "letzter Scan " + data.finished_at.replace("T", " ").replace("+00:00", " UTC") : data.message)
+      ];
+      if (stats.checked != null && !data.running) {
+        bits.push(`${stats.checked} geprüft`);
+        bits.push(`${stats.ok || 0} passen`);
+        bits.push(`${stats.findings || 0} abweichend`);
+        bits.push(`${stats.sure || 0} sicher`);
+      }
+      document.getElementById("meta").innerHTML = bits.map((bit) => `<span class="chip">${esc(bit)}</span>`).join("");
+      const problems = (stats.errors || []);
+      document.getElementById("errors").textContent = problems.length ? problems.join(" ") : "";
+      const bar = document.getElementById("bar");
+      if (data.running && data.total) {
+        bar.hidden = false;
+        document.getElementById("barFill").style.width = `${Math.round(100 * data.progress / data.total)}%`;
+      } else {
+        bar.hidden = true;
+      }
+      if (data.error) toast.textContent = data.error;
+    }
+
+    function renderList(data) {
+      const findings = data.findings || [];
+      if (!findings.length) {
+        list.innerHTML = `<div class="empty">${data.running ? "Scan läuft." : "Keine Abweichung geladen. „Bibliothek prüfen“ vergleicht Ordnernamen und Jahr mit dem, was Jellyfin anzeigt."}</div>`;
+        return;
+      }
+      list.innerHTML = findings.map((finding) => {
+        const candidates = (finding.candidates || []).map((candidate) => `
+          <div class="candidate">
+            <strong>${esc(candidate.name)}${esc(yearOf(candidate.year))}</strong>
+            <span class="score">${Math.round((candidate.score || 0) * 100)}%</span>
+            ${candidate.auto ? '<span class="badge sure">Vorschlag</span>' : ""}
+            <div class="muted">${esc(ids(candidate.provider_ids))}</div>
+            <ul class="notes">${(candidate.notes || []).map((note) => `<li>${esc(note)}</li>`).join("")}</ul>
+            <button type="button" class="${candidate.auto ? "ok" : "secondary"}" data-apply="${esc(finding.item_id)}" data-key="${esc(candidate.key)}">Übernehmen</button>
+          </div>
+        `).join("");
+        const issues = (finding.episode_issues || []).map((issue) => `
+          <div class="candidate">
+            <div>Datei S${String(issue.expected_season).padStart(2, "0")}E${String(issue.expected_episode).padStart(2, "0")}, Jellyfin S${issue.jellyfin_season ?? "?"}E${issue.jellyfin_episode ?? "?"}</div>
+            <div class="path">${esc(issue.path)}</div>
+            <button type="button" class="secondary" data-episode="${esc(issue.item_id)}">Index aus Dateiname setzen</button>
+          </div>
+        `).join("");
+        return `
+          <article class="card">
+            <h3>
+              <span class="badge kind">${kindLabel(finding.kind)}</span>
+              <span class="badge ${esc(finding.status)}">${statusLabel(finding.status)}</span>
+              ${esc(finding.folder_title)}${esc(yearOf(finding.folder_year))}
+            </h3>
+            <div class="swap">Jellyfin zeigt <span class="from">${esc(finding.jellyfin_name)}${esc(yearOf(finding.jellyfin_year))}</span></div>
+            <div class="muted">${esc(finding.reason)}</div>
+            <div class="path">${esc(finding.path)}</div>
+            ${finding.episode_count ? `<div class="muted">${finding.episode_count} Folgen aus Dateinamen gelesen</div>` : ""}
+            ${candidates || '<p class="muted">Kein passender Treffer. Ordnername oder Jahr prüfen.</p>'}
+            ${issues}
+            <div class="row"><button type="button" class="secondary" data-ignore="${esc(finding.item_id)}">Ignorieren</button></div>
+          </article>
+        `;
+      }).join("");
+    }
+
+    async function post(url, body) {
+      toast.textContent = "Bitte warten…";
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body || {})
+      });
+      const data = await response.json();
+      if (!response.ok || data.ok === false) {
+        toast.textContent = data.error || data.errors?.join(" ") || "Fehlgeschlagen";
+        return null;
+      }
+      toast.textContent = "";
+      return data;
+    }
+
+    document.getElementById("testBtn").onclick = async () => {
+      const data = await post("/api/test");
+      if (data) toast.textContent = "Verbunden: " + data.server_name;
+      load();
+    };
+    document.getElementById("scanBtn").onclick = async () => {
+      const data = await post("/api/scan");
+      if (data) toast.textContent = "Scan gestartet";
+      load();
+    };
+    document.getElementById("sureBtn").onclick = async () => {
+      if (!confirm("Alle als sicher markierten Zuordnungen in Jellyfin überschreiben?")) return;
+      const data = await post("/api/apply-sure");
+      if (data) toast.textContent = data.applied?.length ? ("Übernommen: " + data.applied.join(", ")) : "Nichts Sicheres offen";
+      load();
+    };
+    list.onclick = async (event) => {
+      const button = event.target.closest("button");
+      if (!button) return;
+      if (button.dataset.apply) {
+        const data = await post("/api/apply", { item_id: button.dataset.apply, key: button.dataset.key });
+        if (data) toast.textContent = "Übernommen: " + data.name;
+      } else if (button.dataset.ignore) {
+        await post("/api/ignore", { item_id: button.dataset.ignore });
+      } else if (button.dataset.episode) {
+        const data = await post("/api/episode", { item_id: button.dataset.episode });
+        if (data) toast.textContent = "Folgenindex gesetzt";
+      }
+      load();
+    };
+
+    load();
+  </script>
+</body>
+</html>

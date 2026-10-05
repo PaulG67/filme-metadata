@@ -1,0 +1,39 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>filme-metadata</Name>
+  <Repository>ghcr.io/paulg67/filme-metadata:latest</Repository>
+  <Registry>https://github.com/users/PaulG67/packages/container/package/filme-metadata</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/PaulG67/filme-metadata/issues</Support>
+  <Project>https://github.com/PaulG67/filme-metadata</Project>
+  <Overview>Erkennt falsche Jellyfin-Metadaten (z. B. Marvel's Inhumans als Hotel Inhumans) und setzt auf Klick die richtige TMDB/TVDB/IMDb-ID. Schreibt nichts von selbst. Nicht ins Internet freigeben.&#13;
+&#13;
+SETUP: bash &lt;(curl -fsSL https://raw.githubusercontent.com/PaulG67/filme-metadata/main/unraid/install-template.sh)&#13;
+Danach Docker - Container hinzufuegen - Template filme-metadata. API-Key muss ein Admin-Key sein.</Overview>
+  <Category>MediaApp:Other Tools:Utilities</Category>
+  <WebUI>http://[IP]:[PORT:8792]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/PaulG67/filme-metadata/main/unraid/my-filme-metadata.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/PaulG67/filme-metadata/main/unraid/icon.svg</Icon>
+  <ExtraParams>--restart=unless-stopped</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled></DateInstalled>
+  <DonateText></DonateText>
+  <DonateLink></DonateLink>
+  <Requires>Admin-API-Key von Jellyfin. Die Korrektur schreibt erst nach Klick in der Web-UI.</Requires>
+  <Config Name="WebUI Port" Target="8792" Default="8792" Mode="tcp" Description="Web-Oberflaeche. Container-Port bleibt 8792, hier nur der Host-Port." Type="Port" Display="always" Required="true" Mask="false">8792</Config>
+  <Config Name="Appdata" Target="/data" Default="/mnt/user/appdata/filme-metadata" Mode="rw" Description="Letzter Scan und Ignorier-Liste" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/filme-metadata</Config>
+  <Config Name="Jellyfin URL" Target="JELLYFIN_BASEURL" Default="http://172.17.0.1:8096" Mode="" Description="Jellyfin auf dem Unraid-Host" Type="Variable" Display="always" Required="true" Mask="false">http://172.17.0.1:8096</Config>
+  <Config Name="Jellyfin API-Key" Target="JELLYFIN_TOKEN" Default="" Mode="" Description="Admin-API-Key. Dashboard, API-Keys. Noetig, weil die Korrektur Elevation braucht." Type="Variable" Display="always" Required="true" Mask="true"></Config>
+  <Config Name="Jellyfin Benutzer" Target="JELLYFIN_USERNAME" Default="" Mode="" Description="Nur wenn kein API-Key. Der Benutzer muss Admin sein." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Jellyfin Passwort" Target="JELLYFIN_PASSWORD" Default="" Mode="" Description="Nur zusammen mit dem Benutzer" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="TMDB API-Key" Target="TMDB_API_KEY" Default="" Mode="" Description="Optional. Verbessert die Unterscheidung ueber die Folgenzahl einer Staffel. Ohne Key wird nur die Jellyfin-Suche bewertet." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User-ID (Unraid nobody = 99)" Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group-ID (Unraid users = 100)" Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
+  <Config Name="TZ" Target="TZ" Default="Europe/Zurich" Mode="" Description="Zeitzone" Type="Variable" Display="advanced" Required="false" Mask="false">Europe/Zurich</Config>
+  <Config Name="PORT" Target="PORT" Default="8792" Mode="" Description="Interner Port, unveraendert lassen" Type="Variable" Display="advanced" Required="false" Mask="false">8792</Config>
+  <Config Name="SSL Bypass" Target="SSL_BYPASS" Default="false" Mode="" Description="true bei selbstsigniertem Jellyfin-Zertifikat" Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+</Container>

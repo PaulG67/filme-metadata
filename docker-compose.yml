@@ -1,0 +1,16 @@
+services:
+  filme-metadata:
+    image: ghcr.io/paulg67/filme-metadata:latest
+    build: .
+    container_name: filme-metadata
+    restart: unless-stopped
+    environment:
+      JELLYFIN_BASEURL: http://172.17.0.1:8096
+      JELLYFIN_TOKEN: changeme
+      TMDB_API_KEY: ""
+      PORT: "8792"
+      TZ: Europe/Zurich
+    ports:
+      - "8792:8792"
+    volumes:
+      - ./data:/data
