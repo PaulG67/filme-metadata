@@ -58,5 +58,6 @@ echo
 echo "Seite neu laden (F5), dann:"
 echo "  Docker -> Container hinzufuegen -> Template filme-metadata"
 echo "  Jellyfin-URL und Admin-API-Key setzen"
+echo "  Optional: Plex-URL und Plex-Token, dann werden abweichende Plex-Angaben mit verglichen"
 echo "  WebUI: http://UNRAID-IP:8792"
 echo "  Nicht am Router nach aussen freigeben."

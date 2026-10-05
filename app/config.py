@@ -17,6 +17,8 @@ class Settings:
     opensubtitles_password: str
     whisper_model: str
     excerpt_seconds: int
+    plex_baseurl: str
+    plex_token: str
     data_dir: Path
     port: int
     verify_tls: bool
@@ -37,6 +39,8 @@ def load_settings() -> Settings:
         opensubtitles_password=os.environ.get("OPENSUBTITLES_PASSWORD", ""),
         whisper_model=os.environ.get("WHISPER_MODEL", "small").strip() or "small",
         excerpt_seconds=max(8, min(45, int(os.environ.get("EXCERPT_SECONDS", "20") or "20"))),
+        plex_baseurl=os.environ.get("PLEX_BASEURL", "http://172.17.0.1:32400").strip().rstrip("/"),
+        plex_token=os.environ.get("PLEX_TOKEN", "").strip(),
         data_dir=data_dir,
         port=int(os.environ.get("PORT", "8792") or "8792"),
         verify_tls=os.environ.get("SSL_BYPASS", "false").strip().lower() not in {"1", "true", "yes"},

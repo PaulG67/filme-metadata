@@ -23,7 +23,7 @@
       background: radial-gradient(1000px 480px at 0% -10%, #243044, var(--bg));
       color: var(--text);
     }
-    main { max-width: 1100px; margin: 0 auto; padding: 2rem 1.1rem 4rem; }
+    main { max-width: 1200px; margin: 0 auto; padding: 2rem 1.1rem 4rem; }
     h1 { margin: 0 0 .3rem; font-size: 1.7rem; }
     h2 { margin: 1.4rem 0 .6rem; font-size: 1.05rem; }
     p { line-height: 1.45; }
@@ -85,6 +85,7 @@
     table.compare td.k { color: var(--muted); width: 7.2rem; white-space: nowrap; }
     table.compare tr.changed td.value { background: color-mix(in srgb, var(--warn) 10%, transparent); }
     h3 .before, table.compare .before { color: #fecaca; }
+    h3 .plex, table.compare .plex { color: #ddd6fe; }
     h3 .after, table.compare .after { color: #bbf7d0; }
     .arrow { color: var(--muted); padding: 0 .25rem; }
     #toast { color: var(--muted); }
@@ -95,7 +96,7 @@
 <body>
   <main>
     <h1>filme-metadata</h1>
-    <p class="sub">Findet Serien und Filme, die Jellyfin der falschen TMDB-ID zugeordnet hat, und setzt die richtige ID.</p>
+    <p class="sub">Vergleicht Ordner, Jellyfin und Plex. Was stimmt, bleibt gespeichert und wird nicht wieder vorgeschlagen.</p>
     <div class="row" id="meta"></div>
     <div class="bar" id="bar" hidden><span id="barFill"></span></div>
     <div class="row">
@@ -108,6 +109,8 @@
       <summary>So wird ein Film, eine Serie und eine Folge erkannt</summary>
       <p>Der Ordner ist die Absicht, die Provider-ID die Identität. <strong>Marvel's Inhumans</strong> (2017, TMDB 68716, 8 Folgen) und <strong>Hotel Inhumans</strong> (2025, TMDB 276288, 13 Folgen) teilen sich nur das Wort Inhumans. Jellyfin übernimmt oft den ersten Suchtreffer.</p>
       <p>Die App liest Titel und Jahr aus dem Ordner, Staffel und Episode aus <code>S01E03</code> im Dateinamen. Eine ID im Ordner wie <code>{tvdb-328844}</code> gilt sofort. Danach sucht sie über die in Jellyfin eingerichteten Anbieter und bewertet jeden Treffer: fehlende und zusätzliche Wörter, Jahr, und ob die lokalen Folgen in diese Staffel passen. Nur ein klarer Abstand wird als sicher markiert. Übernehmen schreibt die IDs nach Jellyfin und lädt Metadaten neu. Der Gesehen-Status bleibt.</p>
+      <p><strong>Stimmt</strong> merkt sich die aktuellen Angaben dieses Systems. Derselbe Stand wird beim nächsten Scan nicht wieder vorgeschlagen. Ändert sich die ID oder das Jahr, erscheint der Titel erneut.</p>
+      <p>Mit Plex-Token steht daneben, was Plex gespeichert hat, sobald es von Jellyfin abweicht. Du wählst, welcher Vorschlag auf Jellyfin, auf Plex oder auf beide geschrieben wird. „Jellyfin nach Plex“ übernimmt die Jellyfin-IDs, ohne sie dort zu ändern.</p>
       <p><strong>Ausschnitt erkennen</strong> liest den Film selbst, nicht den Dateinamen. Zuerst den Fingerabdruck der Datei bei OpenSubtitles. Trifft der nicht, werden 20 Sekunden Dialog mitgeschnitten und mit den Untertiteln der möglichen Filme verglichen. Dafür brauchst du einen kostenlosen OpenSubtitles-API-Key, für den Dialog zusätzlich Benutzername und Passwort. Beim ersten Mal lädt das Sprachmodell in den Appdata-Ordner.</p>
     </details>
     <div id="errors" class="muted"></div>
@@ -130,6 +133,7 @@
 
     function statusLabel(status) {
       if (status === "sure") return "Sicher";
+      if (status === "split") return "Abweichung";
       if (status === "no_match") return "Kein Treffer";
       return "Prüfen";
     }
@@ -169,6 +173,8 @@
         bits.push(`${stats.findings || 0} abweichend`);
         bits.push(`${stats.sure || 0} sicher`);
       }
+      if (data.accepted_count) bits.push(`${data.accepted_count} bestätigt`);
+      if (data.config && data.config.plex) bits.push("Plex verbunden");
       if (data.config && data.config.excerpt) bits.push("Ausschnitt bereit");
       document.getElementById("meta").innerHTML = bits.map((bit) => `<span class="chip">${esc(bit)}</span>`).join("");
       const problems = (stats.errors || []);
@@ -193,41 +199,98 @@
       return String(value).padStart(2, "0");
     }
 
-    function metaRows(finding, candidate) {
-      const beforeIds = finding.jellyfin_ids || {};
-      const afterIds = (candidate && candidate.provider_ids) || {};
-      const rows = [
-        ["Titel", finding.jellyfin_name, candidate && candidate.name],
-        ["Jahr", finding.jellyfin_year, candidate && candidate.year],
-        ["Originaltitel", finding.jellyfin_original, candidate && candidate.original_name],
-        ["TMDB", beforeIds.Tmdb, afterIds.Tmdb],
-        ["IMDb", beforeIds.Imdb, afterIds.Imdb],
-        ["TVDB", beforeIds.Tvdb, afterIds.Tvdb],
-        ["Beschreibung", finding.jellyfin_overview, candidate && candidate.overview]
-      ];
-      return rows.filter((row) => {
-        if (!(shown(row[1]) || shown(row[2]))) return false;
-        if (row[0] === "Originaltitel") {
-          const title = rows[0];
-          if (shown(row[1]) === shown(title[1]) && shown(row[2]) === shown(title[2])) return false;
-        }
-        return true;
-      });
+    function sourceColumn(key, heading, name, year, original, ids, overview) {
+      return {
+        key,
+        heading,
+        name: name || "",
+        year,
+        original: original || "",
+        ids: ids || {},
+        overview: overview || ""
+      };
     }
 
-    function compareTable(finding, candidate, afterHeading) {
-      const body = metaRows(finding, candidate).map(([label, before, after]) => {
-        const changed = shown(before) !== shown(after);
-        return `<tr class="${changed ? "changed" : ""}">
-          <td class="k">${esc(label)}</td>
-          <td class="value before">${shown(before) ? esc(before) : '<span class="muted">—</span>'}</td>
-          <td class="value after">${shown(after) ? esc(after) : '<span class="muted">—</span>'}</td>
-        </tr>`;
+    function compareColumns(finding, candidate) {
+      const columns = [
+        sourceColumn(
+          "jellyfin",
+          finding.jellyfin_accepted ? "Jellyfin stimmt" : "Jellyfin",
+          finding.jellyfin_name,
+          finding.jellyfin_year,
+          finding.jellyfin_original,
+          finding.jellyfin_ids,
+          finding.jellyfin_overview
+        )
+      ];
+      if (finding.plex) {
+        columns.push(sourceColumn(
+          "plex",
+          finding.plex.accepted ? "Plex stimmt" : "Plex",
+          finding.plex.name,
+          finding.plex.year,
+          finding.plex.original,
+          finding.plex.ids,
+          finding.plex.overview
+        ));
+      }
+      if (candidate && candidate.key !== "side:jellyfin" && candidate.key !== "side:plex") {
+        columns.push(sourceColumn(
+          "proposal",
+          finding.status === "sure" ? "Nachher" : "Vorschlag",
+          candidate.name,
+          candidate.year,
+          candidate.original_name,
+          candidate.provider_ids,
+          candidate.overview
+        ));
+      }
+      return columns;
+    }
+
+    function fieldValue(column, label) {
+      if (label === "Titel") return column.name;
+      if (label === "Jahr") return column.year;
+      if (label === "Originaltitel") return column.original && column.original !== column.name ? column.original : "";
+      if (label === "TMDB") return column.ids.Tmdb;
+      if (label === "IMDb") return column.ids.Imdb;
+      if (label === "TVDB") return column.ids.Tvdb;
+      return column.overview;
+    }
+
+    function compareTable(finding, candidate) {
+      const columns = compareColumns(finding, candidate);
+      const labels = ["Titel", "Jahr", "Originaltitel", "TMDB", "IMDb", "TVDB", "Beschreibung"];
+      const body = labels.filter((label) => columns.some((column) => shown(fieldValue(column, label)))).map((label) => {
+        const values = columns.map((column) => shown(fieldValue(column, label)));
+        const changed = values.some((value) => value !== values[0]);
+        const cells = columns.map((column, index) => {
+          const value = values[index];
+          const tone = column.key === "plex" ? "plex" : (column.key === "proposal" ? "after" : "before");
+          return `<td class="value ${tone}">${value ? esc(value) : '<span class="muted">—</span>'}</td>`;
+        }).join("");
+        return `<tr class="${changed ? "changed" : ""}"><td class="k">${esc(label)}</td>${cells}</tr>`;
       }).join("");
+      const head = columns.map((column) => `<th>${esc(column.heading)}</th>`).join("");
       return `<div class="compare-wrap"><table class="compare">
-        <thead><tr><th></th><th>Vorher in Jellyfin</th><th>${esc(afterHeading)}</th></tr></thead>
+        <thead><tr><th></th>${head}</tr></thead>
         <tbody>${body}</tbody>
       </table></div>`;
+    }
+
+    function workLabel(name, year) {
+      return `${name || "ohne Titel"}${yearOf(year)}`;
+    }
+
+    function sidesDiffer(finding) {
+      if (!finding.plex) return false;
+      const left = finding.jellyfin_ids || {};
+      const right = finding.plex.ids || {};
+      const keys = ["Tmdb", "Imdb", "Tvdb"];
+      if (keys.some((key) => shown(left[key]) && shown(right[key]) && shown(left[key]) !== shown(right[key]))) return true;
+      if (keys.some((key) => shown(left[key]) || shown(right[key])) && keys.some((key) => shown(left[key]) !== shown(right[key]))) return true;
+      if (shown(finding.jellyfin_year) && shown(finding.plex.year) && shown(finding.jellyfin_year) !== shown(finding.plex.year)) return true;
+      return shown(finding.jellyfin_name) !== shown(finding.plex.name);
     }
 
     function episodeRows(finding) {
@@ -250,41 +313,63 @@
 
     function changeCard(finding) {
       const candidate = (finding.candidates || [])[0] || null;
-      const afterHeading = finding.status === "sure" ? "Nachher" : "Vorschlag";
-      const before = `${finding.jellyfin_name || "ohne Titel"}${yearOf(finding.jellyfin_year)}`;
-      const after = candidate ? `${candidate.name || "ohne Titel"}${yearOf(candidate.year)}` : "kein Treffer";
-      const others = (finding.candidates || []).slice(1).map((item) => `
+      const proposal = candidate && candidate.key !== "side:jellyfin" && candidate.key !== "side:plex" ? candidate : null;
+      const jellyLabel = workLabel(finding.jellyfin_name, finding.jellyfin_year);
+      const plexLabel = finding.plex ? workLabel(finding.plex.name, finding.plex.year) : "";
+      const proposalLabel = proposal ? workLabel(proposal.name, proposal.year) : "";
+      const others = (finding.candidates || []).slice(1).filter((item) => item.key !== "side:jellyfin" && item.key !== "side:plex").map((item) => `
         <div class="candidate">
           <strong>${esc(item.name)}${esc(yearOf(item.year))}</strong>
           <span class="score">${Math.round((item.score || 0) * 100)}%</span>
           <div class="muted">${esc(ids(item.provider_ids))}</div>
-          <button type="button" class="secondary" data-apply="${esc(finding.item_id)}" data-key="${esc(item.key)}">Diesen Treffer übernehmen</button>
+          <button type="button" class="secondary" data-apply="${esc(finding.item_id)}" data-key="${esc(item.key)}" data-targets="jellyfin">Auf Jellyfin</button>
+          ${finding.plex && !finding.plex.accepted ? `<button type="button" class="secondary" data-apply="${esc(finding.item_id)}" data-key="${esc(item.key)}" data-targets="plex">Auf Plex</button>` : ""}
         </div>
       `).join("");
-      const primaryButton = candidate
-        ? `<button type="button" class="${candidate.auto ? "ok" : "secondary"}" data-apply="${esc(finding.item_id)}" data-key="${esc(candidate.key)}">Nachher übernehmen</button>`
-        : "";
+      const buttons = [];
+      if (proposal && !finding.jellyfin_accepted) {
+        buttons.push(`<button type="button" class="${proposal.auto ? "ok" : "secondary"}" data-apply="${esc(finding.item_id)}" data-key="${esc(proposal.key)}" data-targets="jellyfin">Vorschlag auf Jellyfin</button>`);
+      }
+      if (proposal && finding.plex && !finding.plex.accepted) {
+        buttons.push(`<button type="button" class="secondary" data-apply="${esc(finding.item_id)}" data-key="${esc(proposal.key)}" data-targets="plex">Vorschlag auf Plex</button>`);
+      }
+      if (proposal && finding.plex && !finding.jellyfin_accepted && !finding.plex.accepted) {
+        buttons.push(`<button type="button" class="ok" data-apply="${esc(finding.item_id)}" data-key="${esc(proposal.key)}" data-targets="jellyfin,plex">Vorschlag auf beide</button>`);
+      }
+      if (finding.plex && !finding.plex.accepted && sidesDiffer(finding)) {
+        buttons.push(`<button type="button" class="secondary" data-apply="${esc(finding.item_id)}" data-key="side:jellyfin" data-targets="plex">Jellyfin nach Plex</button>`);
+      }
+      if (finding.plex && !finding.jellyfin_accepted && sidesDiffer(finding)) {
+        buttons.push(`<button type="button" class="secondary" data-apply="${esc(finding.item_id)}" data-key="side:plex" data-targets="jellyfin">Plex nach Jellyfin</button>`);
+      }
+      if (!finding.jellyfin_accepted) {
+        buttons.push(`<button type="button" class="secondary" data-accept="${esc(finding.item_id)}" data-system="jellyfin">Jellyfin stimmt</button>`);
+      }
+      if (finding.plex && !finding.plex.accepted) {
+        buttons.push(`<button type="button" class="secondary" data-accept="${esc(finding.item_id)}" data-system="plex">Plex stimmt</button>`);
+      }
+      if (finding.plex && (!finding.jellyfin_accepted || !finding.plex.accepted)) {
+        buttons.push(`<button type="button" class="secondary" data-accept="${esc(finding.item_id)}" data-system="both">Beide stimmen</button>`);
+      }
+      buttons.push(`<button type="button" class="secondary" data-listen="${esc(finding.item_id)}">Ausschnitt erkennen</button>`);
+      buttons.push(`<button type="button" class="secondary" data-ignore="${esc(finding.item_id)}">Ignorieren</button>`);
       return `
         <article class="card">
           <h3>
             <span class="badge kind">${kindLabel(finding.kind)}</span>
             <span class="badge ${esc(finding.status)}">${statusLabel(finding.status)}</span>
-            <span class="before">${esc(before)}</span>
-            <span class="arrow">→</span>
-            <span class="after">${esc(after)}</span>
+            <span class="before">${esc(jellyLabel)}</span>
+            ${plexLabel ? `<span class="arrow">·</span><span class="plex">${esc(plexLabel)}</span>` : ""}
+            ${proposalLabel ? `<span class="arrow">→</span><span class="after">${esc(proposalLabel)}</span>` : ""}
           </h3>
           <div class="muted">${esc(finding.reason || "")}</div>
           <div class="path">${esc(finding.path || "")}</div>
-          ${compareTable(finding, candidate, afterHeading)}
-          ${(candidate && candidate.notes || []).length ? `<ul class="notes">${candidate.notes.map((note) => `<li>${esc(note)}</li>`).join("")}</ul>` : ""}
+          ${compareTable(finding, candidate)}
+          ${(proposal && proposal.notes || []).length ? `<ul class="notes">${proposal.notes.map((note) => `<li>${esc(note)}</li>`).join("")}</ul>` : ""}
           ${finding.excerpt_transcript ? `<div class="muted">Gehört: „${esc(finding.excerpt_transcript)}“</div>` : ""}
           ${episodeRows(finding)}
           ${others}
-          <div class="row">
-            ${primaryButton}
-            <button type="button" class="secondary" data-listen="${esc(finding.item_id)}">Ausschnitt erkennen</button>
-            <button type="button" class="secondary" data-ignore="${esc(finding.item_id)}">Ignorieren</button>
-          </div>
+          <div class="row">${buttons.join("")}</div>
         </article>
       `;
     }
@@ -292,22 +377,29 @@
     function renderList(data) {
       const findings = data.findings || [];
       if (!findings.length) {
-        list.innerHTML = `<div class="empty">${data.running ? "Scan läuft." : "Keine Änderung geladen. „Bibliothek prüfen“ zeigt danach, welche Titel andere Metadaten bekommen würden."}</div>`;
+        list.innerHTML = `<div class="empty">${data.running ? "Scan läuft." : "Keine Änderung geladen. „Bibliothek prüfen“ zeigt danach Jellyfin, Plex und den Vorschlag."}</div>`;
         return;
       }
       const sure = findings.filter((item) => item.status === "sure");
-      const review = findings.filter((item) => item.status !== "sure");
+      const split = findings.filter((item) => item.status === "split");
+      const review = findings.filter((item) => item.status !== "sure" && item.status !== "split");
+      const plexNote = data.config && data.config.plex ? ", und nach Plex, wenn dort etwas anderes liegt" : "";
       const blocks = [];
       blocks.push(`<h2>Geplante Änderungen</h2>`);
       if (sure.length) {
-        blocks.push(`<p class="section-note muted">${sure.length} ${sure.length === 1 ? "Titel wird" : "Titel werden"} mit „Alle sicheren übernehmen“ geschrieben. Der Scan selbst ändert Jellyfin nicht.</p>`);
+        blocks.push(`<p class="section-note muted">${sure.length} ${sure.length === 1 ? "Titel wird" : "Titel werden"} mit „Alle sicheren übernehmen“ nach Jellyfin geschrieben${esc(plexNote)}. Als stimmend markierte Angaben bleiben.</p>`);
         blocks.push(sure.map(changeCard).join(""));
       } else {
-        blocks.push(`<p class="section-note muted">Keine sichere Änderung. Unten stehen nur Vorschläge.</p>`);
+        blocks.push(`<p class="section-note muted">Keine sichere Änderung.</p>`);
+      }
+      if (split.length) {
+        blocks.push(`<h2>Plex und Jellyfin unterscheiden sich</h2>`);
+        blocks.push(`<p class="section-note muted">Wähle, welches System die Angaben des anderen übernimmt, oder markiere die bestehenden Angaben als richtig.</p>`);
+        blocks.push(split.map(changeCard).join(""));
       }
       if (review.length) {
         blocks.push(`<h2>Zur Prüfung</h2>`);
-        blocks.push(`<p class="section-note muted">Der beste Treffer ist nicht eindeutig. „Nachher“ ist der Vorschlag, nicht eine automatische Änderung.</p>`);
+        blocks.push(`<p class="section-note muted">Der beste Treffer ist nicht eindeutig. Nichts davon wird automatisch geschrieben.</p>`);
         blocks.push(review.map(changeCard).join(""));
       }
       list.innerHTML = blocks.join("");
@@ -340,7 +432,7 @@
       load();
     };
     document.getElementById("sureBtn").onclick = async () => {
-      if (!confirm("Alle als sicher markierten Zuordnungen in Jellyfin überschreiben?")) return;
+      if (!confirm("Alle sicheren Zuordnungen schreiben? Jellyfin immer, Plex nur wenn dort ein anderer Treffer liegt. Als stimmend markierte Angaben bleiben.")) return;
       const data = await post("/api/apply-sure");
       if (data) toast.textContent = data.applied?.length ? ("Übernommen: " + data.applied.join(", ")) : "Nichts Sicheres offen";
       load();
@@ -349,8 +441,14 @@
       const button = event.target.closest("button");
       if (!button) return;
       if (button.dataset.apply) {
-        const data = await post("/api/apply", { item_id: button.dataset.apply, key: button.dataset.key });
+        const data = await post("/api/apply", {
+          item_id: button.dataset.apply,
+          key: button.dataset.key,
+          targets: (button.dataset.targets || "jellyfin").split(",")
+        });
         if (data) toast.textContent = "Übernommen: " + data.name;
+      } else if (button.dataset.accept) {
+        await post("/api/accept", { item_id: button.dataset.accept, system: button.dataset.system });
       } else if (button.dataset.ignore) {
         await post("/api/ignore", { item_id: button.dataset.ignore });
       } else if (button.dataset.listen) {

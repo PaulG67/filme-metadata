@@ -9,7 +9,7 @@
   <Privileged>false</Privileged>
   <Support>https://github.com/PaulG67/filme-metadata/issues</Support>
   <Project>https://github.com/PaulG67/filme-metadata</Project>
-  <Overview>Erkennt falsche Jellyfin-Metadaten (z. B. Marvel's Inhumans als Hotel Inhumans) und setzt auf Klick die richtige TMDB/TVDB/IMDb-ID. Schreibt nichts von selbst. Nicht ins Internet freigeben.&#13;
+  <Overview>Erkennt falsche Metadaten in Jellyfin und Plex (z. B. Marvel's Inhumans als Hotel Inhumans) und setzt auf Klick die richtige TMDB/TVDB/IMDb-ID. Was als stimmend markiert ist, wird nicht wieder vorgeschlagen. Schreibt nichts von selbst. Nicht ins Internet freigeben.&#13;
 &#13;
 SETUP: bash &lt;(curl -fsSL https://raw.githubusercontent.com/PaulG67/filme-metadata/main/unraid/install-template.sh)&#13;
 Danach Docker - Container hinzufuegen - Template filme-metadata. API-Key muss ein Admin-Key sein.</Overview>
@@ -30,6 +30,8 @@ Danach Docker - Container hinzufuegen - Template filme-metadata. API-Key muss ei
   <Config Name="Jellyfin API-Key" Target="JELLYFIN_TOKEN" Default="" Mode="" Description="Admin-API-Key. Dashboard, API-Keys. Noetig, weil die Korrektur Elevation braucht." Type="Variable" Display="always" Required="true" Mask="true"></Config>
   <Config Name="Jellyfin Benutzer" Target="JELLYFIN_USERNAME" Default="" Mode="" Description="Nur wenn kein API-Key. Der Benutzer muss Admin sein." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
   <Config Name="Jellyfin Passwort" Target="JELLYFIN_PASSWORD" Default="" Mode="" Description="Nur zusammen mit dem Benutzer" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="Plex URL" Target="PLEX_BASEURL" Default="http://172.17.0.1:32400" Mode="" Description="Optional. Plex Media Server, meist Port 32400." Type="Variable" Display="always" Required="false" Mask="false">http://172.17.0.1:32400</Config>
+  <Config Name="Plex Token" Target="PLEX_TOKEN" Default="" Mode="" Description="Optional. X-Plex-Token. Dann werden abweichende Plex-Angaben mit verglichen." Type="Variable" Display="always" Required="false" Mask="true"></Config>
   <Config Name="TMDB API-Key" Target="TMDB_API_KEY" Default="" Mode="" Description="Optional. Verbessert die Unterscheidung ueber die Folgenzahl einer Staffel. Ohne Key wird nur die Jellyfin-Suche bewertet." Type="Variable" Display="always" Required="false" Mask="true"></Config>
   <Config Name="OpenSubtitles API-Key" Target="OPENSUBTITLES_API_KEY" Default="" Mode="" Description="Fuer Ausschnitt-Erkennung. Kostenloser Consumer-Key von opensubtitles.com" Type="Variable" Display="always" Required="false" Mask="true"></Config>
   <Config Name="OpenSubtitles Benutzer" Target="OPENSUBTITLES_USERNAME" Default="" Mode="" Description="Nur fuer den Dialog-Vergleich, wenn der Datei-Fingerabdruck nichts trifft" Type="Variable" Display="always" Required="false" Mask="false"></Config>

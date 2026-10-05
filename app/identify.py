@@ -7,6 +7,7 @@ TMDB/TVDB/IMDb sagen, welcher Datensatz das ist. Ein gemeinsames Wort wie
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
@@ -150,6 +151,40 @@ def same_work(left: dict | None, right: dict | None) -> bool:
     a = norm_provider_ids(left)
     b = norm_provider_ids(right)
     return any(a.get(key) and a.get(key) == b.get(key) for key in ("imdb", "tmdb", "tvdb"))
+
+
+def metadata_signature(name: str, year: int | None, ids: dict | None) -> str:
+    """Fingerprint der bestätigten Identität. Der Anzeigetitel zählt nur ohne Provider-ID."""
+    normalized = norm_provider_ids(ids)
+    if normalized:
+        payload: dict[str, object] = {key: normalized[key] for key in ("imdb", "tmdb", "tvdb") if normalized.get(key)}
+        if year:
+            payload["y"] = int(year)
+        return json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    return json.dumps({"n": normalize(name), "y": int(year) if year else 0}, sort_keys=True, ensure_ascii=False)
+
+
+def systems_differ(
+    left_name: str,
+    left_year: int | None,
+    left_ids: dict | None,
+    right_name: str,
+    right_year: int | None,
+    right_ids: dict | None,
+) -> str | None:
+    if same_work(left_ids, right_ids):
+        if left_year and right_year and abs(int(left_year) - int(right_year)) > 1:
+            return f"Gleiche ID, Jahr {left_year} gegen {right_year}"
+        return None
+    if norm_provider_ids(left_ids) and norm_provider_ids(right_ids):
+        return "Plex und Jellyfin haben unterschiedliche IDs"
+    score = best_title_score(left_name, right_name)
+    year_bad = bool(left_year and right_year and abs(int(left_year) - int(right_year)) > 1)
+    if score < SUSPECT_TITLE or year_bad:
+        shown_left = left_name or "ohne Titel"
+        shown_right = right_name or "ohne Titel"
+        return f"Jellyfin zeigt „{shown_left}“, Plex zeigt „{shown_right}“"
+    return None
 
 
 def candidate_key(ids: dict[str, str], name: str, year: int | None) -> str:

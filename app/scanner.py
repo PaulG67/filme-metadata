@@ -8,14 +8,20 @@ from datetime import datetime, timezone
 from app.config import Settings, load_settings
 from app.identify import (
     build_finding,
+    jellyfin_provider_ids,
     merge_candidates,
+    metadata_signature,
     needs_review,
+    norm_provider_ids,
     parse_episode_index,
     parse_movie_path,
     parse_series_path,
     rank_candidates,
+    same_work,
+    systems_differ,
 )
 from app.jellyfin import JellyfinClient, JellyfinError, candidate_from_jellyfin
+from app.plex import PlexClient, PlexError, PlexIndex
 from app.tmdb import TmdbClient
 
 log = logging.getLogger("filme-metadata")
@@ -35,6 +41,7 @@ class Scanner:
             "stats": {},
             "findings": [],
             "ignored": [],
+            "accepted": {"jellyfin": {}, "plex": {}},
         }
         self._load()
 
@@ -52,9 +59,12 @@ class Scanner:
                 "stats": dict(self._state["stats"]),
                 "findings": [_public_finding(item) for item in self._state["findings"]],
                 "ignored_count": len(self._state["ignored"]),
+                "accepted_count": sum(len(bucket) for bucket in self._state["accepted"].values()),
             }
         state["config"] = {
             "jellyfin_baseurl": settings.jellyfin_baseurl,
+            "plex_baseurl": settings.plex_baseurl,
+            "plex": bool(settings.plex_token),
             "tmdb": bool(settings.tmdb_api_key),
             "excerpt": bool(settings.opensubtitles_api_key),
             "has_token": bool(settings.jellyfin_token),
@@ -64,14 +74,30 @@ class Scanner:
 
     def test_connection(self) -> dict:
         settings = load_settings()
-        client = JellyfinClient.connect(
-            settings.jellyfin_baseurl,
-            settings.jellyfin_token,
-            settings.jellyfin_username,
-            settings.jellyfin_password,
-            settings.verify_tls,
-        )
-        name = client.server_name()
+        names = []
+        errors = []
+        try:
+            client = JellyfinClient.connect(
+                settings.jellyfin_baseurl,
+                settings.jellyfin_token,
+                settings.jellyfin_username,
+                settings.jellyfin_password,
+                settings.verify_tls,
+            )
+            names.append(client.server_name())
+        except (JellyfinError, OSError, RuntimeError) as exc:
+            errors.append(str(exc))
+        if settings.plex_token:
+            plex = PlexClient(settings.plex_baseurl, settings.plex_token, settings.verify_tls)
+            try:
+                names.append(plex.server_name())
+            except (PlexError, OSError, RuntimeError) as exc:
+                errors.append(str(exc))
+            finally:
+                plex.close()
+        if errors:
+            raise RuntimeError("; ".join(errors))
+        name = " · ".join(names) or "verbunden"
         with self._lock:
             self._state["server_name"] = name
         return {"ok": True, "server_name": name}
@@ -87,42 +113,105 @@ class Scanner:
         thread = threading.Thread(target=self._run, name="scan", daemon=True)
         thread.start()
 
-    def apply(self, item_id: str, candidate_key: str) -> dict:
+    def apply(self, item_id: str, candidate_key: str, targets: list[str] | None = None) -> dict:
+        chosen = [target for target in (targets or ["jellyfin"]) if target in {"jellyfin", "plex"}]
+        if not chosen:
+            raise RuntimeError("Kein Ziel angegeben")
         with self._lock:
             if self._state["running"]:
                 raise RuntimeError("Scan läuft noch")
             finding = next((item for item in self._state["findings"] if item["item_id"] == item_id), None)
             if finding is None:
                 raise KeyError("Eintrag nicht gefunden")
-            candidate = next((item for item in finding["candidates"] if item["key"] == candidate_key), None)
+            if candidate_key == "side:jellyfin":
+                candidate = _side_candidate(finding, "jellyfin")
+            elif candidate_key == "side:plex":
+                candidate = _side_candidate(finding, "plex")
+            else:
+                candidate = next((item for item in finding["candidates"] if item["key"] == candidate_key), None)
             if candidate is None:
                 raise KeyError("Treffer nicht gefunden")
             kind = finding["kind"]
+            plex_id = (finding.get("plex") or {}).get("item_id")
             body = _apply_body(candidate)
+            snapshot = dict(finding)
         settings = load_settings()
-        client = _client(settings)
-        client.unlock(item_id)
-        client.apply_remote(item_id, body)
-        if kind == "series":
-            client.refresh(item_id)
+        if "jellyfin" in chosen:
+            if snapshot.get("jellyfin_accepted"):
+                raise RuntimeError("Jellyfin ist als stimmend markiert")
+            client = _client(settings)
+            client.unlock(item_id)
+            client.apply_remote(item_id, body)
+            if kind == "series":
+                client.refresh(item_id)
+            with self._lock:
+                current = next((item for item in self._state["findings"] if item["item_id"] == item_id), None)
+                if current is not None:
+                    _remember_written(self._state["accepted"], current, candidate, ["jellyfin"])
+                    if not still_open(current):
+                        self._state["findings"] = [item for item in self._state["findings"] if item["item_id"] != item_id]
+                self._remember_stats()
+                self._save()
+        if "plex" in chosen:
+            if not plex_id:
+                raise RuntimeError("Kein passender Plex-Eintrag")
+            if (snapshot.get("plex") or {}).get("accepted"):
+                raise RuntimeError("Plex ist als stimmend markiert")
+            if not settings.plex_token:
+                raise PlexError("PLEX_TOKEN fehlt")
+            plex = PlexClient(settings.plex_baseurl, settings.plex_token, settings.verify_tls)
+            try:
+                plex.match(plex_id, candidate.get("name") or "", candidate.get("year"), candidate.get("provider_ids") or {})
+            finally:
+                plex.close()
+            with self._lock:
+                current = next((item for item in self._state["findings"] if item["item_id"] == item_id), None)
+                if current is not None:
+                    _remember_written(self._state["accepted"], current, candidate, ["plex"])
+                    if not still_open(current):
+                        self._state["findings"] = [item for item in self._state["findings"] if item["item_id"] != item_id]
+                self._remember_stats()
+                self._save()
+        return {"ok": True, "name": candidate["name"], "targets": chosen}
+
+    def accept(self, item_id: str, system: str) -> dict:
+        systems = ["jellyfin", "plex"] if system == "both" else [system]
+        if any(item not in {"jellyfin", "plex"} for item in systems):
+            raise RuntimeError("Unbekanntes System")
         with self._lock:
-            self._state["findings"] = [item for item in self._state["findings"] if item["item_id"] != item_id]
+            finding = next((item for item in self._state["findings"] if item["item_id"] == item_id), None)
+            if finding is None:
+                raise KeyError("Eintrag nicht gefunden")
+            if "plex" in systems and not finding.get("plex"):
+                raise RuntimeError("Kein passender Plex-Eintrag")
+            for target in systems:
+                _mark_accepted(self._state["accepted"], finding, target)
+            if not still_open(finding):
+                self._state["findings"] = [item for item in self._state["findings"] if item["item_id"] != item_id]
             self._remember_stats()
             self._save()
-        return {"ok": True, "name": candidate["name"]}
+        return {"ok": True}
 
     def apply_sure(self) -> dict:
         with self._lock:
-            queued = [
-                (item["item_id"], item["candidates"][0]["key"])
-                for item in self._state["findings"]
-                if item["status"] == "sure" and item["candidates"] and item["candidates"][0]["auto"]
-            ]
+            queued = []
+            for item in self._state["findings"]:
+                if item["status"] != "sure" or not item.get("candidates") or not item["candidates"][0].get("auto"):
+                    continue
+                candidate = item["candidates"][0]
+                targets = []
+                if not item.get("jellyfin_accepted"):
+                    targets.append("jellyfin")
+                plex = item.get("plex") or {}
+                if plex and not plex.get("accepted") and not same_work(candidate.get("provider_ids"), plex.get("ids")):
+                    targets.append("plex")
+                if targets:
+                    queued.append((item["item_id"], candidate["key"], targets))
         done = []
         errors = []
-        for item_id, key in queued:
+        for item_id, key, targets in queued:
             try:
-                result = self.apply(item_id, key)
+                result = self.apply(item_id, key, targets)
                 done.append(result["name"])
             except Exception as exc:
                 log.exception("Korrektur fehlgeschlagen")
@@ -195,6 +284,17 @@ class Scanner:
             findings = []
             ok = skipped = 0
             errors: list[str] = []
+            plex_index: PlexIndex | None = None
+            if settings.plex_token:
+                plex = PlexClient(settings.plex_baseurl, settings.plex_token, settings.verify_tls)
+                try:
+                    with self._lock:
+                        self._state["message"] = "Lade Plex"
+                    plex_index = plex.library()
+                except PlexError as exc:
+                    errors.append(str(exc))
+                finally:
+                    plex.close()
             ignored = set(self._state["ignored"])
             total = len(media)
             for index, item in enumerate(media, start=1):
@@ -206,7 +306,7 @@ class Scanner:
                 if item.get("Id") in ignored:
                     continue
                 try:
-                    finding, outcome = self._inspect(client, tmdb, item)
+                    finding, outcome = self._inspect(client, tmdb, item, plex_index)
                 except Exception as exc:
                     log.exception("Eintrag fehlgeschlagen: %s", name)
                     errors.append(f"{name}: {exc}")
@@ -247,7 +347,13 @@ class Scanner:
                 self._state["running"] = False
                 self._save()
 
-    def _inspect(self, client: JellyfinClient, tmdb: TmdbClient | None, item: dict) -> tuple[dict | None, str]:
+    def _inspect(
+        self,
+        client: JellyfinClient,
+        tmdb: TmdbClient | None,
+        item: dict,
+        plex_index: PlexIndex | None,
+    ) -> tuple[dict | None, str]:
         path = item.get("Path") or ""
         if not path:
             return None, "skip"
@@ -261,34 +367,90 @@ class Scanner:
         jellyfin_year = _item_year(item)
         jellyfin_ids = item.get("ProviderIds") or {}
         extra_names = [item.get("OriginalTitle") or ""]
-        if needs_review(title, year, item.get("Name") or "", jellyfin_year, jellyfin_ids, embedded, extra_names) is None:
-            return None, "ok"
-        episodes: list[tuple[int, int]] = []
-        issues: list[dict] = []
-        if kind == "series":
-            episodes, issues = _episode_facts(client.episodes(item["Id"]))
-        candidates = _search(client, tmdb, kind, title, year, item["Id"])
-        finding = build_finding(
-            folder_title=title,
-            folder_year=year,
-            jellyfin_name=item.get("Name") or "",
-            jellyfin_year=jellyfin_year,
-            jellyfin_ids=jellyfin_ids,
-            candidates=candidates,
-            episodes=episodes,
-            embedded_ids=embedded,
-            extra_names=extra_names,
-            episode_issues=issues[:40],
+        jellyfin_name = item.get("Name") or ""
+        jelly_signature = metadata_signature(jellyfin_name, jellyfin_year, jellyfin_ids)
+        jelly_locked = self._is_accepted("jellyfin", item["Id"], jelly_signature)
+        plex_item = None
+        if plex_index is not None:
+            plex_item = plex_index.match(kind=kind, path=path, folder_title=title, folder_year=year)
+        plex_locked = False
+        if plex_item is not None:
+            plex_locked = self._is_accepted(
+                "plex",
+                plex_item["item_id"],
+                metadata_signature(plex_item["name"], plex_item.get("year"), plex_item.get("ids")),
+            )
+        reason = None if jelly_locked else needs_review(
+            title, year, jellyfin_name, jellyfin_year, jellyfin_ids, embedded, extra_names
         )
+        finding = None
+        if reason:
+            episodes: list[tuple[int, int]] = []
+            issues: list[dict] = []
+            if kind == "series":
+                episodes, issues = _episode_facts(client.episodes(item["Id"]))
+            candidates = _search(client, tmdb, kind, title, year, item["Id"])
+            finding = build_finding(
+                folder_title=title,
+                folder_year=year,
+                jellyfin_name=jellyfin_name,
+                jellyfin_year=jellyfin_year,
+                jellyfin_ids=jellyfin_ids,
+                candidates=candidates,
+                episodes=episodes,
+                embedded_ids=embedded,
+                extra_names=extra_names,
+                episode_issues=issues[:40],
+            )
+            if finding is not None:
+                finding["item_id"] = item["Id"]
+                finding["kind"] = kind
+                finding["path"] = path
+                finding["episode_count"] = len(episodes)
+                finding["jellyfin_overview"] = (item.get("Overview") or "").strip()[:400]
+                finding["jellyfin_original"] = (item.get("OriginalTitle") or "").strip()
+                finding["jellyfin_accepted"] = False
+        plex_public = _public_plex(plex_item) if plex_item else None
+        if plex_public is not None:
+            plex_public["accepted"] = plex_locked
+        differ = None
+        if plex_item is not None and not plex_locked:
+            differ = systems_differ(
+                jellyfin_name,
+                jellyfin_year,
+                jellyfin_ids,
+                plex_item["name"],
+                plex_item.get("year"),
+                plex_item.get("ids"),
+            )
         if finding is None:
+            if not differ:
+                return None, "ok"
+            finding = _split_finding(
+                item_id=item["Id"],
+                kind=kind,
+                path=path,
+                folder_title=title,
+                folder_year=year,
+                jellyfin_name=jellyfin_name,
+                jellyfin_year=jellyfin_year,
+                jellyfin_ids=jellyfin_ids,
+                jellyfin_original=(item.get("OriginalTitle") or "").strip(),
+                jellyfin_overview=(item.get("Overview") or "").strip()[:400],
+                jellyfin_accepted=jelly_locked,
+                reason=differ,
+            )
+        elif differ:
+            finding["reason"] = f"{finding['reason']}; {differ}"
+        candidate_ids = ((finding.get("candidates") or [{}])[0] or {}).get("provider_ids")
+        if plex_public is not None and (differ or not same_work(candidate_ids, plex_public.get("ids"))):
+            finding["plex"] = plex_public
+        if not still_open(finding):
             return None, "ok"
-        finding["item_id"] = item["Id"]
-        finding["kind"] = kind
-        finding["path"] = path
-        finding["episode_count"] = len(episodes)
-        finding["jellyfin_overview"] = (item.get("Overview") or "").strip()[:400]
-        finding["jellyfin_original"] = (item.get("OriginalTitle") or "").strip()
         return finding, "finding"
+
+    def _is_accepted(self, system: str, item_id: str, signature: str) -> bool:
+        return self._state["accepted"].get(system, {}).get(item_id) == signature
 
     def _store_listen(self, item_id: str, payload: dict) -> None:
         finding = next((item for item in self._state["findings"] if item["item_id"] == item_id), None)
@@ -358,6 +520,11 @@ class Scanner:
             return
         self._state["findings"] = data.get("findings") or []
         self._state["ignored"] = data.get("ignored") or []
+        accepted = data.get("accepted") or {}
+        self._state["accepted"] = {
+            "jellyfin": dict(accepted.get("jellyfin") or {}),
+            "plex": dict(accepted.get("plex") or {}),
+        }
         self._state["stats"] = data.get("stats") or {}
         self._state["finished_at"] = data.get("finished_at")
         self._state["server_name"] = data.get("server_name")
@@ -368,6 +535,7 @@ class Scanner:
         payload = {
             "findings": self._state["findings"],
             "ignored": self._state["ignored"],
+            "accepted": self._state["accepted"],
             "stats": self._state["stats"],
             "finished_at": self._state["finished_at"],
             "server_name": self._state["server_name"],
@@ -487,4 +655,157 @@ def _public_finding(finding: dict) -> dict:
     return {
         **{key: value for key, value in finding.items() if key != "candidates"},
         "candidates": [{key: value for key, value in candidate.items() if key != "raw"} for candidate in finding.get("candidates") or []],
+    }
+
+
+def still_open(finding: dict) -> bool:
+    plex = finding.get("plex")
+    jelly_open = not finding.get("jellyfin_accepted")
+    if not plex:
+        return jelly_open
+    plex_open = not plex.get("accepted")
+    if not jelly_open and not plex_open:
+        return False
+    differ = systems_differ(
+        finding.get("jellyfin_name") or "",
+        finding.get("jellyfin_year"),
+        finding.get("jellyfin_ids"),
+        plex.get("name") or "",
+        plex.get("year"),
+        plex.get("ids"),
+    )
+    if differ is None:
+        return False
+    return jelly_open or plex_open
+
+
+def _mark_accepted(accepted: dict, finding: dict, system: str) -> None:
+    if system == "plex":
+        plex = finding.get("plex") or {}
+        if not plex.get("item_id"):
+            raise RuntimeError("Kein passender Plex-Eintrag")
+        accepted["plex"][plex["item_id"]] = metadata_signature(plex.get("name") or "", plex.get("year"), plex.get("ids"))
+        plex["accepted"] = True
+        return
+    accepted["jellyfin"][finding["item_id"]] = metadata_signature(
+        finding.get("jellyfin_name") or "",
+        finding.get("jellyfin_year"),
+        finding.get("jellyfin_ids"),
+    )
+    finding["jellyfin_accepted"] = True
+
+
+def _remember_written(accepted: dict, finding: dict, candidate: dict, targets: list[str]) -> None:
+    signature = metadata_signature(candidate.get("name") or "", candidate.get("year"), candidate.get("provider_ids"))
+    ids = candidate.get("provider_ids") or {}
+    if "jellyfin" in targets:
+        accepted["jellyfin"][finding["item_id"]] = signature
+        finding["jellyfin_accepted"] = True
+        finding["jellyfin_name"] = candidate.get("name") or finding.get("jellyfin_name")
+        finding["jellyfin_year"] = candidate.get("year")
+        finding["jellyfin_ids"] = ids
+        finding["jellyfin_overview"] = candidate.get("overview") or ""
+        finding["jellyfin_original"] = candidate.get("original_name") or ""
+    plex = finding.get("plex")
+    if "plex" in targets and plex:
+        accepted["plex"][plex["item_id"]] = signature
+        plex["accepted"] = True
+        plex["name"] = candidate.get("name") or plex.get("name")
+        plex["year"] = candidate.get("year")
+        plex["ids"] = ids
+        plex["overview"] = candidate.get("overview") or ""
+        plex["original"] = candidate.get("original_name") or ""
+
+
+def _side_candidate(finding: dict, system: str) -> dict:
+    if system == "plex":
+        source = finding.get("plex") or {}
+        if not source:
+            raise KeyError("Kein Plex-Eintrag")
+        name = source.get("name") or ""
+        year = source.get("year")
+        ids = source.get("ids") or {}
+        original = source.get("original") or ""
+        overview = source.get("overview") or ""
+    else:
+        name = finding.get("jellyfin_name") or ""
+        year = finding.get("jellyfin_year")
+        ids = finding.get("jellyfin_ids") or {}
+        original = finding.get("jellyfin_original") or ""
+        overview = finding.get("jellyfin_overview") or ""
+    if not norm_provider_ids(ids):
+        raise RuntimeError("Keine IMDb-, TMDB- oder TVDB-ID zum Übernehmen")
+    return {
+        "key": f"side:{system}",
+        "name": name,
+        "year": year,
+        "original_name": original,
+        "provider_ids": ids,
+        "overview": overview,
+        "auto": False,
+        "raw": None,
+    }
+
+
+def _public_plex(item: dict) -> dict:
+    return {
+        "item_id": item["item_id"],
+        "name": item.get("name") or "",
+        "original": item.get("original") or "",
+        "year": item.get("year"),
+        "ids": item.get("ids") or {},
+        "overview": item.get("overview") or "",
+        "path": item.get("path") or "",
+        "accepted": False,
+    }
+
+
+def _split_finding(
+    *,
+    item_id: str,
+    kind: str,
+    path: str,
+    folder_title: str,
+    folder_year: int | None,
+    jellyfin_name: str,
+    jellyfin_year: int | None,
+    jellyfin_ids: dict,
+    jellyfin_original: str,
+    jellyfin_overview: str,
+    jellyfin_accepted: bool,
+    reason: str,
+) -> dict:
+    ids = jellyfin_provider_ids(norm_provider_ids(jellyfin_ids))
+    candidates = []
+    if ids:
+        candidates.append(
+            {
+                "key": "side:jellyfin",
+                "name": jellyfin_name,
+                "year": jellyfin_year,
+                "original_name": jellyfin_original,
+                "provider_ids": ids,
+                "overview": jellyfin_overview,
+                "auto": False,
+                "score": 1,
+                "notes": ["Diese Jellyfin-Angaben nach Plex übernehmen"],
+            }
+        )
+    return {
+        "item_id": item_id,
+        "kind": kind,
+        "path": path,
+        "folder_title": folder_title,
+        "folder_year": folder_year,
+        "jellyfin_name": jellyfin_name,
+        "jellyfin_year": jellyfin_year,
+        "jellyfin_ids": ids,
+        "jellyfin_original": jellyfin_original,
+        "jellyfin_overview": jellyfin_overview,
+        "jellyfin_accepted": jellyfin_accepted,
+        "reason": reason,
+        "status": "split",
+        "candidates": candidates,
+        "episode_issues": [],
+        "episode_count": 0,
     }

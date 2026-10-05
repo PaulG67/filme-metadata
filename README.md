@@ -20,15 +20,17 @@ Der **Ordner** sagt, was du hast. Die **Provider-ID** sagt, welches Werk das ist
 2. **Film:** Ordner `Dune (2021)` schlägt den Dateinamen. So bleiben `Dune (1984)` und `Dune (2021)` getrennt. Eine Zahl im Titel wie `Blade Runner 2049` wird nicht als Erscheinungsjahr gelesen.
 3. **Folge:** `S01E03` oder `1x03` im Dateinamen. Der Folgentitel wird nicht zum Abgleich benutzt, weil er übersetzt oder abgeschnitten sein kann.
 4. **Vergleich mit Jellyfin:** weicht der angezeigte Titel ab oder liegt das Jahr mehr als ein Jahr daneben, ist der Eintrag verdächtig. Stimmt die vorhandene TMDB-, TVDB- oder IMDb-ID schon mit dem besten Treffer überein, bleibt er unangetastet.
-5. **Suche:** Jellyfin-Remote-Search mit dem Ordnernamen, einmal mit Jahr und einmal ohne. Mit optionalem TMDB-Key kommen Staffelfolgenzahlen und die fehlenden IDs dazu.
-6. **Bewertung jedes Treffers:**
+5. **Stimmt:** „Jellyfin stimmt“ oder „Plex stimmt“ speichert die aktuellen IDs und das Jahr. Derselbe Stand wird nicht wieder vorgeschlagen. Weicht die Zuordnung später ab, erscheint der Titel erneut.
+6. **Plex:** mit `PLEX_TOKEN` wird der gleiche Ordner in Plex gesucht. Steht dort ein anderes Werk, zeigt die Karte Jellyfin, Plex und den Vorschlag. Übernehmen gilt für Jellyfin, Plex oder beide. „Jellyfin nach Plex“ kopiert die Jellyfin-IDs, ohne Jellyfin zu ändern.
+7. **Suche:** Jellyfin-Remote-Search mit dem Ordnernamen, einmal mit Jahr und einmal ohne. Mit optionalem TMDB-Key kommen Staffelfolgenzahlen und die fehlenden IDs dazu.
+8. **Bewertung jedes Treffers:**
    - Wörter, die im Ordner fehlen oder im Treffer zu viel sind („Hotel“ zusätzlich, „Marvel's“ fehlt)
    - Jahr: gleich, ein Jahr daneben, oder Widerspruch
    - Folgen: 8 von 8 in Staffel 1 ist ein voller Treffer. Eine Datei `S01E09` kann nicht die 8-teilige Marvel-Serie sein
-7. **Sicher** nur bei hohem Score, mindestens 15 Punkten Abstand und ohne Jahreswiderspruch. `Inhumans` ohne Jahr bleibt auf „Prüfen“, auch wenn die Folgenzahl Marvel wahrscheinlicher macht.
-8. **Ausschnitt:** Button „Ausschnitt erkennen“ liest die Datei über Jellyfin. Zuerst der OpenSubtitles-Fingerabdruck (Anfang und Ende der Datei, dieselbe Idee wie ein Shazam-Signaturabgleich). Trifft der die Fassung nicht, werden 20 Sekunden Dialog transkribiert und mit den Untertiteln der Kandidaten verglichen. Ein Satz, der nur in einer Fassung vorkommt, entscheidet.
+9. **Sicher** nur bei hohem Score, mindestens 15 Punkten Abstand und ohne Jahreswiderspruch. `Inhumans` ohne Jahr bleibt auf „Prüfen“, auch wenn die Folgenzahl Marvel wahrscheinlicher macht.
+10. **Ausschnitt:** Button „Ausschnitt erkennen“ liest die Datei über Jellyfin. Zuerst der OpenSubtitles-Fingerabdruck (Anfang und Ende der Datei, dieselbe Idee wie ein Shazam-Signaturabgleich). Trifft der die Fassung nicht, werden 20 Sekunden Dialog transkribiert und mit den Untertiteln der Kandidaten verglichen. Ein Satz, der nur in einer Fassung vorkommt, entscheidet.
 
-Übernehmen setzt die Provider-IDs und lässt Jellyfin Metadaten und Bilder ersetzen. Bei Serien werden die Folgen danach neu geladen. Der Gesehen-Status liegt in den Benutzerdaten und bleibt.
+Übernehmen setzt die Provider-IDs und lässt Jellyfin oder Plex Metadaten und Bilder ersetzen. Bei Serien auf Jellyfin werden die Folgen danach neu geladen. Der Gesehen-Status liegt in den Benutzerdaten und bleibt.
 
 Ein abweichender Folgenindex (`S01E03` in der Datei, Jellyfin zeigt E01) kann getrennt gesetzt werden.
 
@@ -66,6 +68,8 @@ Sonarr-Ordner mit Jahr, optional mit `{tvdb-ID}`, machen die Entscheidung eindeu
 | `JELLYFIN_BASEURL` | `http://172.17.0.1:8096` | Jellyfin |
 | `JELLYFIN_TOKEN` | leer | Admin-API-Key |
 | `JELLYFIN_USERNAME` / `JELLYFIN_PASSWORD` | leer | Nur ohne API-Key, Benutzer muss Admin sein |
+| `PLEX_BASEURL` | `http://172.17.0.1:32400` | Optional, Plex Media Server |
+| `PLEX_TOKEN` | leer | Optional, X-Plex-Token. Ohne Token bleibt der Vergleich bei Jellyfin |
 | `TMDB_API_KEY` | leer | Optionale zweite Quelle |
 | `OPENSUBTITLES_API_KEY` | leer | Ausschnitt-Erkennung, Consumer-Key von opensubtitles.com |
 | `OPENSUBTITLES_USERNAME` / `OPENSUBTITLES_PASSWORD` | leer | Nur für den Dialog-Vergleich |

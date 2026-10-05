@@ -7,6 +7,8 @@ services:
     environment:
       JELLYFIN_BASEURL: http://172.17.0.1:8096
       JELLYFIN_TOKEN: changeme
+      PLEX_BASEURL: http://172.17.0.1:32400
+      PLEX_TOKEN: ""
       TMDB_API_KEY: ""
       OPENSUBTITLES_API_KEY: ""
       OPENSUBTITLES_USERNAME: ""
