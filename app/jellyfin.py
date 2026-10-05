@@ -31,10 +31,31 @@ class JellyfinError(RuntimeError):
     pass
 
 
+def pick_library_user(users: list, username: str = "") -> str:
+    wanted = (username or "").strip().casefold()
+    admins: list[str] = []
+    for user in users or []:
+        if not isinstance(user, dict) or not user.get("Id"):
+            continue
+        user_id = str(user["Id"])
+        if wanted and str(user.get("Name") or "").casefold() == wanted:
+            return user_id
+        if (user.get("Policy") or {}).get("IsAdministrator"):
+            admins.append(user_id)
+    if admins:
+        return admins[0]
+    for user in users or []:
+        if isinstance(user, dict) and user.get("Id"):
+            return str(user["Id"])
+    raise JellyfinError("Kein Jellyfin-Benutzer gefunden. Der API-Key muss ein Admin-Key sein.")
+
+
 class JellyfinClient:
-    def __init__(self, baseurl: str, token: str, verify: bool) -> None:
+    def __init__(self, baseurl: str, token: str, verify: bool, username: str = "") -> None:
         self.baseurl = baseurl.rstrip("/")
         self.token = clean_token(token)
+        self.username = (username or "").strip()
+        self._user_id = ""
         self.headers = {
             "Authorization": authorization_header(self.token),
             "Accept": "application/json",
@@ -50,14 +71,16 @@ class JellyfinClient:
             raise JellyfinError("JELLYFIN_BASEURL fehlt")
         token = clean_token(token)
         if token:
-            return cls(baseurl, token, verify)
+            return cls(baseurl, token, verify, username)
         if not username:
             raise JellyfinError("Jellyfin API-Key oder Benutzername fehlt")
-        access = cls.login(baseurl, username, password, verify)
-        return cls(baseurl, access, verify)
+        access, user_id = cls.login(baseurl, username, password, verify)
+        client = cls(baseurl, access, verify, username)
+        client._user_id = user_id
+        return client
 
     @staticmethod
-    def login(baseurl: str, username: str, password: str, verify: bool) -> str:
+    def login(baseurl: str, username: str, password: str, verify: bool) -> tuple[str, str]:
         headers = {
             "Authorization": authorization_header(),
             "Accept": "application/json",
@@ -74,10 +97,12 @@ class JellyfinClient:
                 f"Jellyfin-Login fehlgeschlagen ({response.status_code}). "
                 "Besser einen Admin-API-Key als JELLYFIN_TOKEN setzen."
             )
-        access = response.json().get("AccessToken")
+        payload = response.json()
+        access = payload.get("AccessToken")
         if not access:
             raise JellyfinError("Jellyfin-Login ohne AccessToken")
-        return access
+        user_id = str((payload.get("User") or {}).get("Id") or "")
+        return access, user_id
 
     def _request(self, method: str, path: str, *, json: dict | None = None, params: dict | None = None, timeout: float = 60) -> httpx.Response:
         url = f"{self.baseurl}{path}"
@@ -157,14 +182,35 @@ class JellyfinClient:
             return []
         return [item for item in (page.get("Items") or []) if item.get("Id")]
 
-    def media_item(self, item_id: str) -> dict:
-        data = self._get(
-            f"/Items/{item_id}",
-            {"Fields": "MediaSources,RunTimeTicks,Path,ProviderIds,IndexNumber,ParentIndexNumber,ProductionYear,Overview,OriginalTitle,SeriesName,SeriesId,PremiereDate"},
-        )
+    def library_user_id(self) -> str:
+        if self._user_id:
+            return self._user_id
+        try:
+            users = self._get("/Users")
+        except JellyfinError as exc:
+            raise JellyfinError(
+                "Jellyfin-Benutzer nicht lesbar. Der API-Key muss ein Admin-Key sein, "
+                "damit ein Film oder eine Serie geschrieben werden kann."
+            ) from exc
+        if not isinstance(users, list):
+            raise JellyfinError("Jellyfin-Benutzerliste fehlt")
+        self._user_id = pick_library_user(users, self.username)
+        return self._user_id
+
+    def item_record(self, item_id: str, fields: str = "") -> dict:
+        params = {"userId": self.library_user_id()}
+        if fields:
+            params["Fields"] = fields
+        data = self._get(f"/Items/{item_id}", params)
         if not isinstance(data, dict) or not data.get("Id"):
             raise JellyfinError("Eintrag nicht gefunden")
         return data
+
+    def media_item(self, item_id: str) -> dict:
+        return self.item_record(
+            item_id,
+            "MediaSources,RunTimeTicks,Path,ProviderIds,IndexNumber,ParentIndexNumber,ProductionYear,Overview,OriginalTitle,SeriesName,SeriesId,PremiereDate",
+        )
 
     def primary_image(self, item_id: str) -> tuple[bytes, str] | None:
         response = self.http.get(
@@ -295,16 +341,14 @@ class JellyfinClient:
         )
 
     def unlock(self, item_id: str) -> None:
-        item = self._get(f"/Items/{item_id}")
-        if not isinstance(item, dict) or not item.get("LockData"):
+        item = self.item_record(item_id)
+        if not item.get("LockData"):
             return
         item["LockData"] = False
         self._request("POST", f"/Items/{item_id}", json=item, timeout=60)
 
     def set_episode_index(self, item_id: str, season: int, episode: int) -> None:
-        item = self._get(f"/Items/{item_id}")
-        if not isinstance(item, dict):
-            raise JellyfinError("Folge nicht gefunden")
+        item = self.item_record(item_id)
         item["ParentIndexNumber"] = season
         item["IndexNumber"] = episode
         self._request("POST", f"/Items/{item_id}", json=item, timeout=60)

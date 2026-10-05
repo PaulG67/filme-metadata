@@ -1,4 +1,4 @@
-from app.jellyfin import JellyfinClient
+from app.jellyfin import JellyfinClient, pick_library_user
 from app.scanner import _apply_body
 
 
@@ -37,6 +37,32 @@ def test_api_key_goes_in_authorization_header():
     )
     assert "X-Emby-Token" not in client.headers
     assert 'Token="abc123"' in client.ffmpeg_headers()
+    client.http.close()
+
+
+def test_item_read_sends_the_admin_user_id(monkeypatch):
+    users = [
+        {"Name": "gast", "Id": "guest-id", "Policy": {"IsAdministrator": False}},
+        {"Name": "paul", "Id": "admin-id", "Policy": {"IsAdministrator": True}},
+    ]
+    assert pick_library_user(users, "paul") == "admin-id"
+    assert pick_library_user(users, "") == "admin-id"
+    client = JellyfinClient("http://127.0.0.1:9", "token", verify=False, username="paul")
+    calls = []
+
+    def fake_get(path, params=None):
+        calls.append((path, params))
+        if path == "/Users":
+            return users
+        return {"Id": "5b59ee28e3440db7cb677553f7bbe440", "LockData": False}
+
+    monkeypatch.setattr(client, "_get", fake_get)
+    item = client.item_record("5b59ee28e3440db7cb677553f7bbe440")
+    assert item["LockData"] is False
+    assert calls[1] == (
+        "/Items/5b59ee28e3440db7cb677553f7bbe440",
+        {"userId": "admin-id"},
+    )
     client.http.close()
 
 
