@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from app.config import Settings, load_settings
 from app.identify import (
     build_finding,
+    candidate_key,
     jellyfin_provider_ids,
     merge_candidates,
     metadata_signature,
@@ -16,6 +17,8 @@ from app.identify import (
     parse_episode_index,
     parse_movie_path,
     parse_series_path,
+    parse_title_and_ids,
+    is_generic_dir,
     rank_candidates,
     same_work,
     systems_differ,
@@ -240,25 +243,61 @@ class Scanner:
             self._save()
         return {"ok": True}
 
+    def search_library(self, term: str) -> list[dict]:
+        client = _client(load_settings())
+        return [library_hit(item) for item in client.search_items(term)]
+
+    def focus(self, item_id: str) -> dict:
+        settings = load_settings()
+        client = _client(settings)
+        item = client.media_item(item_id)
+        summary = library_hit(item)
+        if item.get("Type") == "Episode":
+            return {"ok": True, "clean": episode_mismatch(item) is None, "item": summary, "issue": episode_mismatch(item)}
+        tmdb = TmdbClient(settings.tmdb_api_key) if settings.tmdb_api_key else None
+        finding, _outcome = self._inspect(client, tmdb, item, None)
+        if finding is None:
+            return {"ok": True, "clean": True, "item": summary, "issue": None}
+        with self._lock:
+            rest = [entry for entry in self._state["findings"] if entry["item_id"] != finding["item_id"]]
+            self._state["findings"] = [finding, *rest]
+            self._remember_stats()
+            self._save()
+        return {"ok": True, "clean": False, "item": summary, "issue": None}
+
     def listen(self, item_id: str) -> dict:
         from app.excerpt import ExcerptError
         from app.listen import recognize
 
+        settings = load_settings()
+        client = _client(settings)
+        item = client.media_item(item_id)
+        target_id = item_id
+        kind_hint = "movie"
+        playable = None
+        if item.get("Type") == "Episode":
+            target_id = str(item.get("SeriesId") or "")
+            if not target_id:
+                raise RuntimeError("Die Folge ist keiner Serie zugeordnet")
+            kind_hint = "series"
+            playable = item
+        elif item.get("Type") == "Series":
+            kind_hint = "series"
         with self._lock:
             if self._state["running"]:
                 raise RuntimeError("Scan läuft noch")
-            finding = next((item for item in self._state["findings"] if item["item_id"] == item_id), None)
-            candidates = [dict(item) for item in (finding or {}).get("candidates") or []]
+            finding = next((entry for entry in self._state["findings"] if entry["item_id"] == target_id), None)
+            candidates = [dict(entry) for entry in (finding or {}).get("candidates") or []]
             for candidate in candidates:
                 candidate.pop("raw", None)
-            kind_hint = (finding or {}).get("kind")
-        settings = load_settings()
+        if not candidates:
+            candidates = self._listen_candidates(client, settings, item)
         try:
-            payload = recognize(_client(settings), settings, item_id, candidates, kind_hint)
+            payload = recognize(client, settings, target_id, candidates, kind_hint, playable)
         except ExcerptError:
             raise
         with self._lock:
-            self._store_listen(item_id, payload)
+            self._store_listen(target_id, payload)
             self._remember_stats()
             self._save()
         return {"ok": True, "message": payload["message"]}
@@ -449,6 +488,31 @@ class Scanner:
             return None, "ok"
         return finding, "finding"
 
+    def _listen_candidates(self, client: JellyfinClient, settings: Settings, item: dict) -> list[dict]:
+        title, year = _listen_query(item)
+        if not title:
+            return []
+        kind = "series" if item.get("Type") in {"Series", "Episode"} else "movie"
+        tmdb = TmdbClient(settings.tmdb_api_key) if settings.tmdb_api_key else None
+        search_id = str(item.get("SeriesId") or item.get("Id") or "")
+        found = _search(client, tmdb, kind, title, year, search_id)
+        public = []
+        for candidate in found[:4]:
+            public.append(
+                {
+                    "key": candidate_key(candidate.provider_ids, candidate.name, candidate.year),
+                    "name": candidate.name,
+                    "year": candidate.year,
+                    "original_name": candidate.original_name,
+                    "provider_ids": jellyfin_provider_ids(candidate.provider_ids),
+                    "overview": (candidate.overview or "")[:400],
+                    "auto": False,
+                    "notes": [],
+                    "score": candidate.score,
+                }
+            )
+        return public
+
     def _is_accepted(self, system: str, item_id: str, signature: str) -> bool:
         return self._state["accepted"].get(system, {}).get(item_id) == signature
 
@@ -551,6 +615,53 @@ def _client(settings: Settings) -> JellyfinClient:
         settings.jellyfin_password,
         settings.verify_tls,
     )
+
+
+def library_hit(item: dict) -> dict:
+    kind = {"Movie": "movie", "Series": "series", "Episode": "episode"}.get(item.get("Type") or "", "movie")
+    return {
+        "id": item.get("Id"),
+        "name": item.get("Name") or "",
+        "year": _item_year(item),
+        "type": kind,
+        "series": item.get("SeriesName") or "",
+        "season": item.get("ParentIndexNumber"),
+        "episode": item.get("IndexNumber"),
+        "path": item.get("Path") or "",
+    }
+
+
+def episode_mismatch(item: dict) -> dict | None:
+    expected = parse_episode_index(item.get("Path") or "")
+    if expected is None:
+        return None
+    season, number = expected
+    if item.get("ParentIndexNumber") == season and item.get("IndexNumber") == number:
+        return None
+    return {
+        "item_id": item.get("Id"),
+        "expected_season": season,
+        "expected_episode": number,
+        "jellyfin_season": item.get("ParentIndexNumber"),
+        "jellyfin_episode": item.get("IndexNumber"),
+    }
+
+
+def _listen_query(item: dict) -> tuple[str, int | None]:
+    from pathlib import PurePosixPath
+
+    path = (item.get("Path") or "").replace("\\", "/")
+    if item.get("Type") == "Episode":
+        for parent in list(PurePosixPath(path).parents)[:4]:
+            title, year, _ids = parse_title_and_ids(parent.name, allow_bare_year=False)
+            if title and year and not is_generic_dir(title):
+                return title, year
+        return item.get("SeriesName") or "", None
+    if item.get("Type") == "Series":
+        title, year, _ids = parse_series_path(path)
+        return title or item.get("Name") or "", year or _item_year(item)
+    title, year, _ids = parse_movie_path(path)
+    return title or item.get("Name") or "", year or _item_year(item)
 
 
 def _item_year(item: dict) -> int | None:

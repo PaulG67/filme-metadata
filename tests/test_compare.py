@@ -1,6 +1,37 @@
 from app.identify import metadata_signature, systems_differ
 from app.plex import PlexIndex, direct_guid, folder_keys, pick_match_guid
-from app.scanner import still_open
+from app.scanner import episode_mismatch, library_hit, still_open
+
+
+def test_library_hit_labels_episode():
+    hit = library_hit(
+        {
+            "Id": "ep",
+            "Type": "Episode",
+            "Name": "Behold",
+            "SeriesName": "Marvel's Inhumans",
+            "ParentIndexNumber": 1,
+            "IndexNumber": 3,
+            "Path": "/serien/Show/S01E03.mkv",
+        }
+    )
+    assert hit["type"] == "episode"
+    assert hit["series"] == "Marvel's Inhumans"
+    assert hit["episode"] == 3
+
+
+def test_episode_mismatch_uses_filename():
+    issue = episode_mismatch(
+        {
+            "Id": "ep",
+            "Path": "/serien/Show/S01E03.mkv",
+            "ParentIndexNumber": 1,
+            "IndexNumber": 1,
+        }
+    )
+    assert issue["expected_episode"] == 3
+    assert issue["jellyfin_episode"] == 1
+    assert episode_mismatch({"Path": "/serien/Show/S01E03.mkv", "ParentIndexNumber": 1, "IndexNumber": 3}) is None
 
 
 def test_signature_uses_provider_ids_not_display_title():

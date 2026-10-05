@@ -20,106 +20,132 @@
     body {
       margin: 0;
       font-family: "Segoe UI", system-ui, sans-serif;
-      background: radial-gradient(1000px 480px at 0% -10%, #243044, var(--bg));
+      background: #10141c;
       color: var(--text);
     }
-    main { max-width: 1200px; margin: 0 auto; padding: 2rem 1.1rem 4rem; }
-    h1 { margin: 0 0 .3rem; font-size: 1.7rem; }
-    h2 { margin: 1.4rem 0 .6rem; font-size: 1.05rem; }
+    main { max-width: 1080px; margin: 0 auto; padding: 1.6rem 1.1rem 4rem; }
+    h1 { margin: 0; font-size: 1.55rem; letter-spacing: -.02em; }
+    h2 { margin: 1.6rem 0 .45rem; font-size: 1rem; }
     p { line-height: 1.45; }
-    .sub, .muted { color: var(--muted); }
-    .row { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; margin: .9rem 0; }
-    button, .chip {
+    .sub, .muted, .summary { color: var(--muted); }
+    .summary { margin: .35rem 0 0; }
+    .toolbar, .row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+    .toolbar { margin: 1rem 0 .8rem; }
+    button, input, .chip {
       border: 0;
       border-radius: 8px;
       padding: .55rem .85rem;
+      font: inherit;
       font-weight: 650;
     }
     button { background: var(--accent); color: #0c1220; cursor: pointer; }
-    button.secondary { background: #334155; color: var(--text); }
+    button.secondary { background: #2a3548; color: var(--text); }
     button.ok { background: var(--ok); color: #062216; }
-    button:disabled { opacity: .5; cursor: not-allowed; }
-    .chip {
+    button:disabled, body.busy button[data-listen] { opacity: .55; cursor: progress; }
+    input[type="search"] {
+      width: 100%;
       background: var(--panel);
+      color: var(--text);
       border: 1px solid var(--line);
-      color: var(--muted);
-      font-weight: 600;
+      font-weight: 500;
     }
-    .card, .explain, details {
+    input::placeholder { color: #6f7d93; }
+    .search { margin: .9rem 0 .8rem; }
+    .search label { display: block; margin-bottom: .35rem; font-size: .85rem; }
+    .hits, .card, .notice, .pick, details {
       background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 12px;
     }
-    .explain, details { padding: .9rem 1rem; margin: .8rem 0 1rem; }
+    .hits { margin: 0 0 .8rem; overflow: hidden; }
+    .hits button {
+      display: flex;
+      width: 100%;
+      text-align: left;
+      gap: .6rem;
+      align-items: baseline;
+      background: transparent;
+      color: var(--text);
+      border-radius: 0;
+      border-bottom: 1px solid var(--line);
+      font-weight: 550;
+    }
+    .hits button:last-child { border-bottom: 0; }
+    .hits button:hover { background: #222b3d; }
+    .notice, .pick, details, .card { padding: .9rem 1rem; }
+    .notice { margin-bottom: .8rem; }
+    .notice.busy { border-color: #3d527a; }
+    .notice.ok { border-color: #1f6b49; }
+    .notice.bad { border-color: #8a3d44; color: #fecaca; }
+    .pick { margin-bottom: .9rem; }
+    details { margin: 0 0 1rem; }
     details summary { cursor: pointer; font-weight: 650; }
-    .card { padding: 1rem 1.05rem; margin-bottom: .75rem; }
-    .card h3 { margin: 0 0 .35rem; font-size: 1.05rem; display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; }
+    .card { margin-bottom: .7rem; }
+    .card h3 { margin: 0 0 .3rem; font-size: 1.02rem; display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; }
     .badge {
       display: inline-block;
       border-radius: 999px;
-      padding: .12rem .5rem;
-      font-size: .75rem;
+      padding: .1rem .5rem;
+      font-size: .72rem;
       font-weight: 700;
     }
     .badge.sure { background: color-mix(in srgb, var(--ok) 25%, transparent); color: #b6f3d4; }
-    .badge.review { background: color-mix(in srgb, var(--warn) 22%, transparent); color: #f8e3a3; }
+    .badge.review, .badge.split { background: color-mix(in srgb, var(--warn) 22%, transparent); color: #f8e3a3; }
     .badge.no_match { background: color-mix(in srgb, var(--bad) 25%, transparent); color: #fecaca; }
     .badge.kind { background: #243044; color: #d5e2ff; }
-    .swap { margin: .2rem 0 .45rem; }
-    .swap .from { color: var(--bad); }
-    .swap .to { color: var(--ok); }
     .path { font-family: ui-monospace, Consolas, monospace; font-size: .78rem; color: var(--muted); word-break: break-all; }
-    .candidate {
-      border-top: 1px solid var(--line);
-      padding-top: .7rem;
-      margin-top: .7rem;
-    }
+    .candidate { border-top: 1px solid var(--line); padding-top: .7rem; margin-top: .7rem; }
     .notes { margin: .35rem 0 .5rem; padding-left: 1.1rem; color: var(--muted); }
-    .score { font-variant-numeric: tabular-nums; color: var(--accent); }
-    .empty { padding: 1.4rem; text-align: center; color: var(--muted); border: 1px dashed var(--line); border-radius: 12px; }
-    .section-note { margin: .2rem 0 .8rem; }
-    .compare-wrap { overflow-x: auto; margin-top: .8rem; }
+    .empty { padding: 1.5rem 1rem; text-align: center; color: var(--muted); border: 1px dashed var(--line); border-radius: 12px; }
+    .section-note { margin: 0 0 .7rem; }
+    .compare-wrap { overflow-x: auto; margin-top: .7rem; }
     table.compare { width: 100%; border-collapse: collapse; font-size: .92rem; }
-    table.compare th { text-align: left; color: var(--muted); font-size: .75rem; font-weight: 650; letter-spacing: .03em; padding: .2rem .45rem .45rem; }
-    table.compare td { vertical-align: top; padding: .45rem; border-top: 1px solid var(--line); }
+    table.compare th { text-align: left; color: var(--muted); font-size: .75rem; font-weight: 650; padding: .15rem .4rem .4rem; }
+    table.compare td { vertical-align: top; padding: .42rem .4rem; border-top: 1px solid var(--line); }
     table.compare td.k { color: var(--muted); width: 7.2rem; white-space: nowrap; }
     table.compare tr.changed td.value { background: color-mix(in srgb, var(--warn) 10%, transparent); }
     h3 .before, table.compare .before { color: #fecaca; }
     h3 .plex, table.compare .plex { color: #ddd6fe; }
     h3 .after, table.compare .after { color: #bbf7d0; }
-    .arrow { color: var(--muted); padding: 0 .25rem; }
-    #toast { color: var(--muted); }
-    .bar { height: 8px; background: #101722; border-radius: 99px; overflow: hidden; margin: .4rem 0 .8rem; }
+    .arrow { color: var(--muted); }
+    .bar { height: 6px; background: #1a2130; border-radius: 99px; overflow: hidden; margin: 0 0 .8rem; }
     .bar span { display: block; height: 100%; background: var(--accent); width: 0; }
+    .errors { color: #fecaca; margin: 0 0 .7rem; }
   </style>
 </head>
 <body>
   <main>
     <h1>filme-metadata</h1>
-    <p class="sub">Vergleicht Ordner, Jellyfin und Plex. Was stimmt, bleibt gespeichert und wird nicht wieder vorgeschlagen.</p>
-    <div class="row" id="meta"></div>
-    <div class="bar" id="bar" hidden><span id="barFill"></span></div>
-    <div class="row">
-      <button type="button" id="testBtn">Verbindung prüfen</button>
+    <p class="sub">Die Liste zeigt nur Titel, bei denen sich etwas ändern würde. Oben kannst du trotzdem einen bestimmten Film, eine Serie oder eine Folge wählen.</p>
+    <form class="search" id="searchForm">
+      <label class="muted" for="query">Titel aus der Bibliothek</label>
+      <input id="query" type="search" placeholder="Film, Serie oder Folge suchen" autocomplete="off" />
+    </form>
+    <div id="hits"></div>
+    <div id="pick"></div>
+    <p class="summary" id="summary"></p>
+    <div class="toolbar">
+      <button type="button" id="testBtn" class="secondary">Verbindung</button>
       <button type="button" id="scanBtn">Bibliothek prüfen</button>
-      <button type="button" class="ok" id="sureBtn">Alle sicheren übernehmen</button>
-      <span id="toast"></span>
+      <button type="button" class="ok" id="sureBtn">Sichere übernehmen</button>
     </div>
+    <div class="bar" id="bar" hidden><span id="barFill"></span></div>
+    <div id="notice" class="notice" hidden></div>
+    <div id="errors" class="errors"></div>
     <details>
-      <summary>So wird ein Film, eine Serie und eine Folge erkannt</summary>
-      <p>Der Ordner ist die Absicht, die Provider-ID die Identität. <strong>Marvel's Inhumans</strong> (2017, TMDB 68716, 8 Folgen) und <strong>Hotel Inhumans</strong> (2025, TMDB 276288, 13 Folgen) teilen sich nur das Wort Inhumans. Jellyfin übernimmt oft den ersten Suchtreffer.</p>
-      <p>Die App liest Titel und Jahr aus dem Ordner, Staffel und Episode aus <code>S01E03</code> im Dateinamen. Eine ID im Ordner wie <code>{tvdb-328844}</code> gilt sofort. Danach sucht sie über die in Jellyfin eingerichteten Anbieter und bewertet jeden Treffer: fehlende und zusätzliche Wörter, Jahr, und ob die lokalen Folgen in diese Staffel passen. Nur ein klarer Abstand wird als sicher markiert. Übernehmen schreibt die IDs nach Jellyfin und lädt Metadaten neu. Der Gesehen-Status bleibt.</p>
-      <p><strong>Stimmt</strong> merkt sich die aktuellen Angaben dieses Systems. Derselbe Stand wird beim nächsten Scan nicht wieder vorgeschlagen. Ändert sich die ID oder das Jahr, erscheint der Titel erneut.</p>
-      <p>Mit Plex-Token steht daneben, was Plex gespeichert hat, sobald es von Jellyfin abweicht. Du wählst, welcher Vorschlag auf Jellyfin, auf Plex oder auf beide geschrieben wird. „Jellyfin nach Plex“ übernimmt die Jellyfin-IDs, ohne sie dort zu ändern.</p>
-      <p><strong>Ausschnitt erkennen</strong> liest den Film selbst, nicht den Dateinamen. Zuerst den Fingerabdruck der Datei bei OpenSubtitles. Trifft der nicht, werden 20 Sekunden Dialog mitgeschnitten und mit den Untertiteln der möglichen Filme verglichen. Dafür brauchst du einen kostenlosen OpenSubtitles-API-Key, für den Dialog zusätzlich Benutzername und Passwort. Beim ersten Mal lädt das Sprachmodell in den Appdata-Ordner.</p>
+      <summary>Kurz erklärt</summary>
+      <p>Die Liste enthält nur Titel, bei denen sich etwas ändern würde. „Stimmt“ merkt sich den jetzigen Stand, der erscheint erst wieder, wenn ID oder Jahr sich ändern.</p>
+      <p>„Ausschnitt erkennen“ liest die Datei über Jellyfin: zuerst den Fingerabdruck, sonst 20 Sekunden Dialog. Dafür brauchst du einen OpenSubtitles-API-Key. Der erste Lauf lädt das Sprachmodell und dauert länger.</p>
     </details>
-    <div id="errors" class="muted"></div>
     <div id="list"></div>
   </main>
   <script>
-    const toast = document.getElementById("toast");
     const list = document.getElementById("list");
+    const notice = document.getElementById("notice");
     let polling = null;
+    let searchTimer = null;
+    let picked = null;
+    let busy = false;
 
     function esc(value) {
       return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
@@ -128,7 +154,9 @@
     }
 
     function kindLabel(kind) {
-      return kind === "movie" ? "Film" : "Serie";
+      if (kind === "movie") return "Film";
+      if (kind === "episode") return "Folge";
+      return "Serie";
     }
 
     function statusLabel(status) {
@@ -146,39 +174,42 @@
       return Object.entries(map || {}).map(([key, value]) => `${key} ${value}`).join(" · ");
     }
 
+    function showNotice(text, tone) {
+      notice.hidden = !text;
+      notice.className = "notice" + (tone ? " " + tone : "");
+      notice.textContent = text || "";
+    }
+
     async function load() {
       const response = await fetch("/api/status");
       const data = await response.json();
-      renderMeta(data);
+      renderSummary(data);
+      renderPick();
       renderList(data);
       if (data.running && !polling) polling = setInterval(load, 1200);
       if (!data.running && polling) {
         clearInterval(polling);
         polling = null;
       }
-      document.getElementById("scanBtn").disabled = data.running;
-      document.getElementById("sureBtn").disabled = data.running;
+      document.getElementById("scanBtn").disabled = data.running || busy;
+      document.getElementById("sureBtn").disabled = data.running || busy;
+      const problems = [...(data.stats && data.stats.errors || [])];
+      if (data.error) problems.unshift(data.error);
+      document.getElementById("errors").textContent = problems.join(" ");
     }
 
-    function renderMeta(data) {
+    function renderSummary(data) {
       const stats = data.stats || {};
-      const bits = [
-        data.server_name || data.config.jellyfin_baseurl,
-        data.config.tmdb ? "TMDB zusätzlich" : "nur Jellyfin-Suche",
-        data.running ? data.message : (data.finished_at ? "letzter Scan " + data.finished_at.replace("T", " ").replace("+00:00", " UTC") : data.message)
-      ];
-      if (stats.checked != null && !data.running) {
-        bits.push(`${stats.checked} geprüft`);
-        bits.push(`${stats.ok || 0} passen`);
-        bits.push(`${stats.findings || 0} abweichend`);
-        bits.push(`${stats.sure || 0} sicher`);
-      }
+      const bits = [];
+      const open = (data.findings || []).filter(hasAdjustment).length;
+      if (data.running) bits.push(data.message || "Scan läuft");
+      else if (stats.checked != null) {
+        const word = open === 1 ? "Anpassung" : "Anpassungen";
+        bits.push(open ? `${open} ${word} von ${stats.checked} Titeln` : `Keine offene Anpassung von ${stats.checked} Titeln`);
+      } else bits.push(data.message || "Noch keine Prüfung");
+      if (data.config && data.config.plex) bits.push("Plex dabei");
       if (data.accepted_count) bits.push(`${data.accepted_count} bestätigt`);
-      if (data.config && data.config.plex) bits.push("Plex verbunden");
-      if (data.config && data.config.excerpt) bits.push("Ausschnitt bereit");
-      document.getElementById("meta").innerHTML = bits.map((bit) => `<span class="chip">${esc(bit)}</span>`).join("");
-      const problems = (stats.errors || []);
-      document.getElementById("errors").textContent = problems.length ? problems.join(" ") : "";
+      document.getElementById("summary").textContent = bits.join(" · ");
       const bar = document.getElementById("bar");
       if (data.running && data.total) {
         bar.hidden = false;
@@ -186,7 +217,6 @@
       } else {
         bar.hidden = true;
       }
-      if (data.error) toast.textContent = data.error;
     }
 
     function shown(value) {
@@ -200,18 +230,21 @@
     }
 
     function sourceColumn(key, heading, name, year, original, ids, overview) {
-      return {
-        key,
-        heading,
-        name: name || "",
-        year,
-        original: original || "",
-        ids: ids || {},
-        overview: overview || ""
-      };
+      return { key, heading, name: name || "", year, original: original || "", ids: ids || {}, overview: overview || "" };
     }
 
-    function compareColumns(finding, candidate) {
+    function topCandidate(finding) {
+      return (finding.candidates || [])[0] || null;
+    }
+
+    function proposalOf(finding) {
+      const candidate = topCandidate(finding);
+      if (!candidate || candidate.key === "side:jellyfin" || candidate.key === "side:plex") return null;
+      return candidate;
+    }
+
+    function compareColumns(finding) {
+      const proposal = proposalOf(finding);
       const columns = [
         sourceColumn(
           "jellyfin",
@@ -234,15 +267,15 @@
           finding.plex.overview
         ));
       }
-      if (candidate && candidate.key !== "side:jellyfin" && candidate.key !== "side:plex") {
+      if (proposal) {
         columns.push(sourceColumn(
           "proposal",
           finding.status === "sure" ? "Nachher" : "Vorschlag",
-          candidate.name,
-          candidate.year,
-          candidate.original_name,
-          candidate.provider_ids,
-          candidate.overview
+          proposal.name,
+          proposal.year,
+          proposal.original_name,
+          proposal.provider_ids,
+          proposal.overview
         ));
       }
       return columns;
@@ -258,19 +291,31 @@
       return column.overview;
     }
 
-    function compareTable(finding, candidate) {
-      const columns = compareColumns(finding, candidate);
-      const labels = ["Titel", "Jahr", "Originaltitel", "TMDB", "IMDb", "TVDB", "Beschreibung"];
-      const body = labels.filter((label) => columns.some((column) => shown(fieldValue(column, label)))).map((label) => {
+    const fieldLabels = ["Titel", "Jahr", "Originaltitel", "TMDB", "IMDb", "TVDB", "Beschreibung"];
+
+    function changedFields(finding) {
+      const columns = compareColumns(finding);
+      return fieldLabels.filter((label) => {
         const values = columns.map((column) => shown(fieldValue(column, label)));
-        const changed = values.some((value) => value !== values[0]);
-        const cells = columns.map((column, index) => {
-          const value = values[index];
+        return values.some((value) => value) && values.some((value) => value !== values[0]);
+      });
+    }
+
+    function hasAdjustment(finding) {
+      return changedFields(finding).length > 0 || (finding.episode_issues || []).length > 0;
+    }
+
+    function compareTable(finding) {
+      const columns = compareColumns(finding);
+      const body = changedFields(finding).map((label) => {
+        const cells = columns.map((column) => {
+          const value = shown(fieldValue(column, label));
           const tone = column.key === "plex" ? "plex" : (column.key === "proposal" ? "after" : "before");
           return `<td class="value ${tone}">${value ? esc(value) : '<span class="muted">—</span>'}</td>`;
         }).join("");
-        return `<tr class="${changed ? "changed" : ""}"><td class="k">${esc(label)}</td>${cells}</tr>`;
+        return `<tr class="changed"><td class="k">${esc(label)}</td>${cells}</tr>`;
       }).join("");
+      if (!body) return "";
       const head = columns.map((column) => `<th>${esc(column.heading)}</th>`).join("");
       return `<div class="compare-wrap"><table class="compare">
         <thead><tr><th></th>${head}</tr></thead>
@@ -287,16 +332,15 @@
       const left = finding.jellyfin_ids || {};
       const right = finding.plex.ids || {};
       const keys = ["Tmdb", "Imdb", "Tvdb"];
-      if (keys.some((key) => shown(left[key]) && shown(right[key]) && shown(left[key]) !== shown(right[key]))) return true;
-      if (keys.some((key) => shown(left[key]) || shown(right[key])) && keys.some((key) => shown(left[key]) !== shown(right[key]))) return true;
-      if (shown(finding.jellyfin_year) && shown(finding.plex.year) && shown(finding.jellyfin_year) !== shown(finding.plex.year)) return true;
+      if (keys.some((key) => shown(left[key]) !== shown(right[key]) && (shown(left[key]) || shown(right[key])))) return true;
+      if (shown(finding.jellyfin_year) !== shown(finding.plex.year) && (shown(finding.jellyfin_year) || shown(finding.plex.year))) return true;
       return shown(finding.jellyfin_name) !== shown(finding.plex.name);
     }
 
     function episodeRows(finding) {
       const issues = finding.episode_issues || [];
       if (!issues.length) return "";
-      const body = issues.slice(0, 12).map((issue) => `
+      const body = issues.slice(0, 8).map((issue) => `
         <tr class="changed">
           <td class="k">${esc(issue.name || "Folge")}</td>
           <td class="value before">S${pad(issue.jellyfin_season)}E${pad(issue.jellyfin_episode)}</td>
@@ -306,35 +350,35 @@
         </tr>
       `).join("");
       return `<div class="compare-wrap"><table class="compare">
-        <thead><tr><th>Folge</th><th>Vorher</th><th>Nachher aus Dateiname</th></tr></thead>
+        <thead><tr><th>Folge</th><th>Jetzt</th><th>Datei</th></tr></thead>
         <tbody>${body}</tbody>
       </table></div>`;
     }
 
     function changeCard(finding) {
-      const candidate = (finding.candidates || [])[0] || null;
-      const proposal = candidate && candidate.key !== "side:jellyfin" && candidate.key !== "side:plex" ? candidate : null;
+      const proposal = proposalOf(finding);
       const jellyLabel = workLabel(finding.jellyfin_name, finding.jellyfin_year);
       const plexLabel = finding.plex ? workLabel(finding.plex.name, finding.plex.year) : "";
       const proposalLabel = proposal ? workLabel(proposal.name, proposal.year) : "";
       const others = (finding.candidates || []).slice(1).filter((item) => item.key !== "side:jellyfin" && item.key !== "side:plex").map((item) => `
         <div class="candidate">
           <strong>${esc(item.name)}${esc(yearOf(item.year))}</strong>
-          <span class="score">${Math.round((item.score || 0) * 100)}%</span>
           <div class="muted">${esc(ids(item.provider_ids))}</div>
-          <button type="button" class="secondary" data-apply="${esc(finding.item_id)}" data-key="${esc(item.key)}" data-targets="jellyfin">Auf Jellyfin</button>
-          ${finding.plex && !finding.plex.accepted ? `<button type="button" class="secondary" data-apply="${esc(finding.item_id)}" data-key="${esc(item.key)}" data-targets="plex">Auf Plex</button>` : ""}
+          <div class="row">
+            <button type="button" class="secondary" data-apply="${esc(finding.item_id)}" data-key="${esc(item.key)}" data-targets="jellyfin">Auf Jellyfin</button>
+            ${finding.plex && !finding.plex.accepted ? `<button type="button" class="secondary" data-apply="${esc(finding.item_id)}" data-key="${esc(item.key)}" data-targets="plex">Auf Plex</button>` : ""}
+          </div>
         </div>
       `).join("");
       const buttons = [];
       if (proposal && !finding.jellyfin_accepted) {
-        buttons.push(`<button type="button" class="${proposal.auto ? "ok" : "secondary"}" data-apply="${esc(finding.item_id)}" data-key="${esc(proposal.key)}" data-targets="jellyfin">Vorschlag auf Jellyfin</button>`);
+        buttons.push(`<button type="button" class="${proposal.auto ? "ok" : ""}" data-apply="${esc(finding.item_id)}" data-key="${esc(proposal.key)}" data-targets="jellyfin">Auf Jellyfin</button>`);
       }
       if (proposal && finding.plex && !finding.plex.accepted) {
-        buttons.push(`<button type="button" class="secondary" data-apply="${esc(finding.item_id)}" data-key="${esc(proposal.key)}" data-targets="plex">Vorschlag auf Plex</button>`);
+        buttons.push(`<button type="button" class="secondary" data-apply="${esc(finding.item_id)}" data-key="${esc(proposal.key)}" data-targets="plex">Auf Plex</button>`);
       }
       if (proposal && finding.plex && !finding.jellyfin_accepted && !finding.plex.accepted) {
-        buttons.push(`<button type="button" class="ok" data-apply="${esc(finding.item_id)}" data-key="${esc(proposal.key)}" data-targets="jellyfin,plex">Vorschlag auf beide</button>`);
+        buttons.push(`<button type="button" class="ok" data-apply="${esc(finding.item_id)}" data-key="${esc(proposal.key)}" data-targets="jellyfin,plex">Auf beide</button>`);
       }
       if (finding.plex && !finding.plex.accepted && sidesDiffer(finding)) {
         buttons.push(`<button type="button" class="secondary" data-apply="${esc(finding.item_id)}" data-key="side:jellyfin" data-targets="plex">Jellyfin nach Plex</button>`);
@@ -342,17 +386,10 @@
       if (finding.plex && !finding.jellyfin_accepted && sidesDiffer(finding)) {
         buttons.push(`<button type="button" class="secondary" data-apply="${esc(finding.item_id)}" data-key="side:plex" data-targets="jellyfin">Plex nach Jellyfin</button>`);
       }
-      if (!finding.jellyfin_accepted) {
-        buttons.push(`<button type="button" class="secondary" data-accept="${esc(finding.item_id)}" data-system="jellyfin">Jellyfin stimmt</button>`);
-      }
-      if (finding.plex && !finding.plex.accepted) {
-        buttons.push(`<button type="button" class="secondary" data-accept="${esc(finding.item_id)}" data-system="plex">Plex stimmt</button>`);
-      }
-      if (finding.plex && (!finding.jellyfin_accepted || !finding.plex.accepted)) {
-        buttons.push(`<button type="button" class="secondary" data-accept="${esc(finding.item_id)}" data-system="both">Beide stimmen</button>`);
-      }
+      if (!finding.jellyfin_accepted) buttons.push(`<button type="button" class="secondary" data-accept="${esc(finding.item_id)}" data-system="jellyfin">Jellyfin stimmt</button>`);
+      if (finding.plex && !finding.plex.accepted) buttons.push(`<button type="button" class="secondary" data-accept="${esc(finding.item_id)}" data-system="plex">Plex stimmt</button>`);
       buttons.push(`<button type="button" class="secondary" data-listen="${esc(finding.item_id)}">Ausschnitt erkennen</button>`);
-      buttons.push(`<button type="button" class="secondary" data-ignore="${esc(finding.item_id)}">Ignorieren</button>`);
+      buttons.push(`<button type="button" class="secondary" data-ignore="${esc(finding.item_id)}">Ausblenden</button>`);
       return `
         <article class="card">
           <h3>
@@ -363,9 +400,7 @@
             ${proposalLabel ? `<span class="arrow">→</span><span class="after">${esc(proposalLabel)}</span>` : ""}
           </h3>
           <div class="muted">${esc(finding.reason || "")}</div>
-          <div class="path">${esc(finding.path || "")}</div>
-          ${compareTable(finding, candidate)}
-          ${(proposal && proposal.notes || []).length ? `<ul class="notes">${proposal.notes.map((note) => `<li>${esc(note)}</li>`).join("")}</ul>` : ""}
+          ${compareTable(finding)}
           ${finding.excerpt_transcript ? `<div class="muted">Gehört: „${esc(finding.excerpt_transcript)}“</div>` : ""}
           ${episodeRows(finding)}
           ${others}
@@ -375,95 +410,209 @@
     }
 
     function renderList(data) {
-      const findings = data.findings || [];
+      const findings = (data.findings || []).filter(hasAdjustment);
       if (!findings.length) {
-        list.innerHTML = `<div class="empty">${data.running ? "Scan läuft." : "Keine Änderung geladen. „Bibliothek prüfen“ zeigt danach Jellyfin, Plex und den Vorschlag."}</div>`;
+        list.innerHTML = `<div class="empty">${data.running ? "Prüfung läuft." : "Keine Anpassung offen. Oben kannst du trotzdem einen Titel aus der Bibliothek wählen."}</div>`;
         return;
       }
-      const sure = findings.filter((item) => item.status === "sure");
-      const split = findings.filter((item) => item.status === "split");
-      const review = findings.filter((item) => item.status !== "sure" && item.status !== "split");
-      const plexNote = data.config && data.config.plex ? ", und nach Plex, wenn dort etwas anderes liegt" : "";
-      const blocks = [];
-      blocks.push(`<h2>Geplante Änderungen</h2>`);
-      if (sure.length) {
-        blocks.push(`<p class="section-note muted">${sure.length} ${sure.length === 1 ? "Titel wird" : "Titel werden"} mit „Alle sicheren übernehmen“ nach Jellyfin geschrieben${esc(plexNote)}. Als stimmend markierte Angaben bleiben.</p>`);
-        blocks.push(sure.map(changeCard).join(""));
-      } else {
-        blocks.push(`<p class="section-note muted">Keine sichere Änderung.</p>`);
-      }
-      if (split.length) {
-        blocks.push(`<h2>Plex und Jellyfin unterscheiden sich</h2>`);
-        blocks.push(`<p class="section-note muted">Wähle, welches System die Angaben des anderen übernimmt, oder markiere die bestehenden Angaben als richtig.</p>`);
-        blocks.push(split.map(changeCard).join(""));
-      }
-      if (review.length) {
-        blocks.push(`<h2>Zur Prüfung</h2>`);
-        blocks.push(`<p class="section-note muted">Der beste Treffer ist nicht eindeutig. Nichts davon wird automatisch geschrieben.</p>`);
-        blocks.push(review.map(changeCard).join(""));
-      }
-      list.innerHTML = blocks.join("");
+      const groups = [
+        ["Sicher", findings.filter((item) => item.status === "sure"), "Diese schreibt „Sichere übernehmen“. Markierte Angaben bleiben."],
+        ["Plex weicht ab", findings.filter((item) => item.status === "split"), "Wähle, welches System die Angaben übernimmt."],
+        ["Prüfen", findings.filter((item) => item.status !== "sure" && item.status !== "split"), "Noch nicht eindeutig. Nichts wird automatisch geschrieben."]
+      ];
+      list.innerHTML = groups.filter((group) => group[1].length).map(([title, items, note]) => `
+        <h2>${esc(title)}</h2>
+        <p class="section-note muted">${esc(note)}</p>
+        ${items.map(changeCard).join("")}
+      `).join("");
     }
 
-    async function post(url, body, waiting) {
-      toast.textContent = waiting || "Bitte warten…";
+    function renderPick() {
+      const box = document.getElementById("pick");
+      if (!picked) {
+        box.innerHTML = "";
+        box.hidden = true;
+        return;
+      }
+      box.hidden = false;
+      const item = picked.item || {};
+      const where = item.series ? `${item.series} · ` : "";
+      const index = item.type === "episode" ? ` S${pad(item.season)}E${pad(item.episode)}` : yearOf(item.year);
+      let extra = "";
+      if (picked.issue) {
+        const issue = picked.issue;
+        extra = `<p>Datei S${pad(issue.expected_season)}E${pad(issue.expected_episode)}, Jellyfin zeigt S${pad(issue.jellyfin_season)}E${pad(issue.jellyfin_episode)}.</p>
+          <button type="button" class="ok" data-episode="${esc(issue.item_id)}">Index aus Dateiname setzen</button>`;
+      } else if (picked.clean) {
+        extra = `<p class="muted">Keine Anpassung nötig.</p>`;
+      } else {
+        extra = `<p class="muted">Die Anpassung steht in der Liste.</p>`;
+      }
+      box.innerHTML = `
+        <div class="pick">
+          <h3><span class="badge kind">${kindLabel(item.type)}</span> ${esc(where + (item.name || ""))}${esc(index)}</h3>
+          <div class="path">${esc(item.path || "")}</div>
+          ${extra}
+          <div class="row">
+            <button type="button" data-listen="${esc(item.id)}">Ausschnitt erkennen</button>
+            <button type="button" class="secondary" id="clearPick">Schließen</button>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderHits(items) {
+      const box = document.getElementById("hits");
+      if (!items.length) {
+        box.innerHTML = "";
+        box.hidden = true;
+        return;
+      }
+      box.hidden = false;
+      box.innerHTML = items.map((item) => {
+        const where = item.series ? `${item.series} · ` : "";
+        const index = item.type === "episode" ? ` S${pad(item.season)}E${pad(item.episode)}` : yearOf(item.year);
+        return `<button type="button" data-choose="${esc(item.id)}"><span class="badge kind">${kindLabel(item.type)}</span><span>${esc(where + item.name)}${esc(index)}</span></button>`;
+      }).join("");
+    }
+
+    async function post(url, body) {
       const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body || {})
       });
-      const data = await response.json();
+      let data = {};
+      try {
+        data = await response.json();
+      } catch {
+        data = { error: "Keine Antwort vom Server" };
+      }
       if (!response.ok || data.ok === false) {
-        toast.textContent = data.error || data.errors?.join(" ") || "Fehlgeschlagen";
+        showNotice(data.error || (data.errors || []).join(" ") || "Fehlgeschlagen", "bad");
         return null;
       }
-      toast.textContent = "";
       return data;
     }
 
+    async function runListen(itemId, button) {
+      if (busy) return;
+      busy = true;
+      document.body.classList.add("busy");
+      const previous = button ? button.textContent : "";
+      if (button) {
+        button.disabled = true;
+        button.textContent = "Lese Ausschnitt…";
+      }
+      showNotice("Ausschnitt wird gelesen. Der erste Lauf lädt das Sprachmodell und kann einige Minuten dauern.", "busy");
+      try {
+        const data = await post("/api/listen", { item_id: itemId });
+        if (data) showNotice(data.message || "Erkannt", "ok");
+      } catch (error) {
+        showNotice(error && error.message ? error.message : "Ausschnitt fehlgeschlagen", "bad");
+      } finally {
+        busy = false;
+        document.body.classList.remove("busy");
+        if (button) {
+          button.disabled = false;
+          button.textContent = previous;
+        }
+        await load();
+      }
+    }
+
     document.getElementById("testBtn").onclick = async () => {
+      showNotice("Verbindung wird geprüft…", "busy");
       const data = await post("/api/test");
-      if (data) toast.textContent = "Verbunden: " + data.server_name;
+      if (data) showNotice("Verbunden: " + data.server_name, "ok");
       load();
     };
     document.getElementById("scanBtn").onclick = async () => {
+      showNotice("Bibliothek wird geprüft…", "busy");
       const data = await post("/api/scan");
-      if (data) toast.textContent = "Scan gestartet";
+      if (data) showNotice("Prüfung läuft.", "busy");
       load();
     };
     document.getElementById("sureBtn").onclick = async () => {
-      if (!confirm("Alle sicheren Zuordnungen schreiben? Jellyfin immer, Plex nur wenn dort ein anderer Treffer liegt. Als stimmend markierte Angaben bleiben.")) return;
+      if (!confirm("Sichere Anpassungen jetzt schreiben? Jellyfin immer, Plex nur bei einem anderen Treffer.")) return;
+      showNotice("Schreibe sichere Anpassungen…", "busy");
       const data = await post("/api/apply-sure");
-      if (data) toast.textContent = data.applied?.length ? ("Übernommen: " + data.applied.join(", ")) : "Nichts Sicheres offen";
+      if (data) showNotice(data.applied && data.applied.length ? ("Übernommen: " + data.applied.join(", ")) : "Nichts Sicheres offen", data.applied && data.applied.length ? "ok" : "");
       load();
     };
-    list.onclick = async (event) => {
+    document.getElementById("searchForm").onsubmit = (event) => event.preventDefault();
+    document.getElementById("query").oninput = () => {
+      clearTimeout(searchTimer);
+      const term = document.getElementById("query").value.trim();
+      if (term.length < 2) {
+        renderHits([]);
+        return;
+      }
+      searchTimer = setTimeout(async () => {
+        try {
+          const response = await fetch("/api/library?q=" + encodeURIComponent(term));
+          const data = await response.json();
+          if (!response.ok || data.ok === false) {
+            showNotice(data.error || "Suche fehlgeschlagen", "bad");
+            renderHits([]);
+            return;
+          }
+          renderHits(data.items || []);
+        } catch {
+          showNotice("Suche fehlgeschlagen", "bad");
+          renderHits([]);
+        }
+      }, 250);
+    };
+    document.body.addEventListener("click", async (event) => {
       const button = event.target.closest("button");
-      if (!button) return;
+      if (!button || busy && !button.dataset.listen) return;
+      if (button.id === "clearPick") {
+        picked = null;
+        renderPick();
+        return;
+      }
+      if (button.dataset.choose) {
+        showNotice("Prüfe diesen Titel…", "busy");
+        const data = await post("/api/focus", { item_id: button.dataset.choose });
+        if (!data) return;
+        picked = data;
+        document.getElementById("query").value = "";
+        renderHits([]);
+        showNotice(data.clean ? "Keine Anpassung nötig. Den Ausschnitt kannst du trotzdem lesen." : "Anpassung gefunden.", data.clean ? "" : "ok");
+        await load();
+        return;
+      }
+      if (button.dataset.listen) {
+        await runListen(button.dataset.listen, button);
+        return;
+      }
       if (button.dataset.apply) {
+        showNotice("Schreibe Änderung…", "busy");
         const data = await post("/api/apply", {
           item_id: button.dataset.apply,
           key: button.dataset.key,
           targets: (button.dataset.targets || "jellyfin").split(",")
         });
-        if (data) toast.textContent = "Übernommen: " + data.name;
+        if (data) showNotice("Übernommen: " + data.name, "ok");
       } else if (button.dataset.accept) {
-        await post("/api/accept", { item_id: button.dataset.accept, system: button.dataset.system });
+        const data = await post("/api/accept", { item_id: button.dataset.accept, system: button.dataset.system });
+        if (data) showNotice("Angaben gespeichert. Dieser Stand wird nicht wieder vorgeschlagen.", "ok");
       } else if (button.dataset.ignore) {
-        await post("/api/ignore", { item_id: button.dataset.ignore });
-      } else if (button.dataset.listen) {
-        const data = await post(
-          "/api/listen",
-          { item_id: button.dataset.listen },
-          "Ausschnitt wird gelesen. Beim ersten Mal lädt das Sprachmodell, das kann einige Minuten dauern."
-        );
-        if (data) toast.textContent = data.message || "Erkannt";
+        const data = await post("/api/ignore", { item_id: button.dataset.ignore });
+        if (data) showNotice("Ausgeblendet.", "ok");
       } else if (button.dataset.episode) {
+        showNotice("Setze Folgenindex…", "busy");
         const data = await post("/api/episode", { item_id: button.dataset.episode });
-        if (data) toast.textContent = "Folgenindex gesetzt";
+        if (data) {
+          showNotice("Folgenindex gesetzt.", "ok");
+          if (picked && picked.issue && picked.issue.item_id === button.dataset.episode) picked.issue = null;
+        }
+      } else {
+        return;
       }
-      load();
-    };
+      await load();
+    });
 
     load();
   </script>

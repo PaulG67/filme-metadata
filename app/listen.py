@@ -31,20 +31,23 @@ def recognize(
     item_id: str,
     candidates: list[dict],
     kind_hint: str | None,
+    playable: dict | None = None,
 ) -> dict:
     subtitles = OpenSubtitles(
         settings.opensubtitles_api_key,
         settings.opensubtitles_username,
         settings.opensubtitles_password,
     )
-    item = client.media_item(item_id)
-    playable = item
+    item = playable or client.media_item(item_id)
     kind = "movie"
-    if item.get("Type") == "Series" or kind_hint == "series":
+    source = item
+    if item.get("Type") == "Episode":
         kind = "series"
-        if item.get("Type") == "Series":
-            playable = _middle_episode(client, item_id)
-    hit = _hash_hit(client, subtitles, playable)
+        source = item
+    elif item.get("Type") == "Series" or kind_hint == "series":
+        kind = "series"
+        source = _middle_episode(client, item.get("Id") or item_id)
+    hit = _hash_hit(client, subtitles, source)
     if hit:
         note = "Datei-Fingerabdruck trifft diese Fassung"
         candidate = _candidate_from_hit(client, item_id, hit, note, kind)
@@ -55,12 +58,12 @@ def recognize(
             "promote_key": None,
             "note": note,
             "kind": hit["kind"],
-            "path": playable.get("Path") or item.get("Path") or "",
+            "path": source.get("Path") or item.get("Path") or "",
             "jellyfin_name": item.get("Name") or "",
             "jellyfin_year": item.get("ProductionYear"),
         }
-    season, episode = _season_episode(playable)
-    transcript, offset = _hear(client, settings, playable)
+    season, episode = _season_episode(source)
+    transcript, offset = _hear(client, settings, source)
     matched: list[tuple[dict, str]] = []
     for candidate in candidates[:4]:
         text = _subtitle_for_candidate(subtitles, candidate, kind, season, episode)
@@ -78,7 +81,7 @@ def recognize(
             "promote_key": candidate.get("key"),
             "note": note,
             "kind": kind,
-            "path": playable.get("Path") or "",
+            "path": source.get("Path") or "",
             "jellyfin_name": item.get("Name") or "",
             "jellyfin_year": item.get("ProductionYear"),
         }

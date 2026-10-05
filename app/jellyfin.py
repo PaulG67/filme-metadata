@@ -138,10 +138,29 @@ class JellyfinClient:
                 break
         return items
 
+    def search_items(self, term: str) -> list[dict]:
+        query = term.strip()
+        if len(query) < 2:
+            return []
+        page = self._get(
+            "/Items",
+            {
+                "SearchTerm": query,
+                "Recursive": "true",
+                "IncludeItemTypes": "Movie,Series,Episode",
+                "Fields": "Path,ProductionYear,PremiereDate,IndexNumber,ParentIndexNumber,SeriesName",
+                "Limit": "20",
+                "EnableTotalRecordCount": "false",
+            },
+        )
+        if not isinstance(page, dict):
+            return []
+        return [item for item in (page.get("Items") or []) if item.get("Id")]
+
     def media_item(self, item_id: str) -> dict:
         data = self._get(
             f"/Items/{item_id}",
-            {"Fields": "MediaSources,RunTimeTicks,Path,ProviderIds,IndexNumber,ParentIndexNumber,ProductionYear"},
+            {"Fields": "MediaSources,RunTimeTicks,Path,ProviderIds,IndexNumber,ParentIndexNumber,ProductionYear,Overview,OriginalTitle,SeriesName,SeriesId,PremiereDate"},
         )
         if not isinstance(data, dict) or not data.get("Id"):
             raise JellyfinError("Eintrag nicht gefunden")

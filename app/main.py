@@ -52,6 +52,25 @@ def create_app() -> Flask:
             return jsonify({"ok": False, "error": str(exc)}), 409
         return jsonify({"ok": True})
 
+    @app.get("/api/library")
+    def library():
+        term = str(request.args.get("q") or "")
+        try:
+            return jsonify({"ok": True, "items": scanner.search_library(term)})
+        except (JellyfinError, OSError, RuntimeError) as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+    @app.post("/api/focus")
+    def focus():
+        payload = request.get_json(silent=True) or {}
+        item_id = str(payload.get("item_id") or "")
+        if not item_id:
+            return jsonify({"ok": False, "error": "item_id fehlt"}), 400
+        try:
+            return jsonify(scanner.focus(item_id))
+        except (JellyfinError, RuntimeError, OSError) as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
     @app.post("/api/apply")
     def apply():
         payload = request.get_json(silent=True) or {}
