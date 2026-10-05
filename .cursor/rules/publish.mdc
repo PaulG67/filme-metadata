@@ -1,0 +1,16 @@
+---
+description: Nach jeder Änderung am Unraid-App committen und nach GitHub pushen
+alwaysApply: true
+---
+
+# Veröffentlichen
+
+Die laufende Unraid-App sieht nur das Image `ghcr.io/paulg67/filme-metadata`. Ein lokaler Stand reicht nicht.
+
+Nach jeder abgeschlossenen Änderung an dieser App:
+
+1. Änderungen committen (keine Secrets, kein `git config`, kein Force-Push).
+2. Nach `origin` auf `main` pushen, damit GitHub das Image neu baut.
+3. Dem Nutzer die Commit-Nachricht und den GHCR-Lauf nennen und sagen, dass der Container in Unraid aktualisiert werden muss.
+
+Nicht auf eine extra Aufforderung wie „veröffentliche“ warten. Das gilt auch, wenn die Änderung klein ist.
