@@ -56,6 +56,7 @@ class Scanner:
         state["config"] = {
             "jellyfin_baseurl": settings.jellyfin_baseurl,
             "tmdb": bool(settings.tmdb_api_key),
+            "excerpt": bool(settings.opensubtitles_api_key),
             "has_token": bool(settings.jellyfin_token),
             "has_user": bool(settings.jellyfin_username),
         }
@@ -149,6 +150,29 @@ class Scanner:
                 ]
             self._save()
         return {"ok": True}
+
+    def listen(self, item_id: str) -> dict:
+        from app.excerpt import ExcerptError
+        from app.listen import recognize
+
+        with self._lock:
+            if self._state["running"]:
+                raise RuntimeError("Scan läuft noch")
+            finding = next((item for item in self._state["findings"] if item["item_id"] == item_id), None)
+            candidates = [dict(item) for item in (finding or {}).get("candidates") or []]
+            for candidate in candidates:
+                candidate.pop("raw", None)
+            kind_hint = (finding or {}).get("kind")
+        settings = load_settings()
+        try:
+            payload = recognize(_client(settings), settings, item_id, candidates, kind_hint)
+        except ExcerptError:
+            raise
+        with self._lock:
+            self._store_listen(item_id, payload)
+            self._remember_stats()
+            self._save()
+        return {"ok": True, "message": payload["message"]}
 
     def ignore(self, item_id: str) -> None:
         with self._lock:
@@ -263,6 +287,57 @@ class Scanner:
         finding["path"] = path
         finding["episode_count"] = len(episodes)
         return finding, "finding"
+
+    def _store_listen(self, item_id: str, payload: dict) -> None:
+        finding = next((item for item in self._state["findings"] if item["item_id"] == item_id), None)
+        note = payload.get("note") or ""
+        transcript = payload.get("transcript") or ""
+        if payload.get("promote_key") and finding is not None:
+            chosen = next((item for item in finding["candidates"] if item.get("key") == payload["promote_key"]), None)
+            if chosen is None:
+                raise KeyError("Treffer nicht mehr vorhanden")
+            for item in finding["candidates"]:
+                item["auto"] = False
+            chosen["auto"] = True
+            chosen["score"] = 1
+            notes = [note] + [item for item in (chosen.get("notes") or []) if item != note]
+            chosen["notes"] = notes
+            rest = [item for item in finding["candidates"] if item is not chosen]
+            finding["candidates"] = [chosen, *rest]
+            finding["status"] = "sure"
+            finding["reason"] = note
+            finding["excerpt_transcript"] = transcript
+            return
+        candidate = payload.get("candidate")
+        if not candidate:
+            return
+        if finding is None:
+            self._state["findings"].insert(
+                0,
+                {
+                    "item_id": item_id,
+                    "kind": payload.get("kind") or "movie",
+                    "path": payload.get("path") or "",
+                    "folder_title": candidate.get("name") or "",
+                    "folder_year": candidate.get("year"),
+                    "jellyfin_name": payload.get("jellyfin_name") or "",
+                    "jellyfin_year": payload.get("jellyfin_year"),
+                    "jellyfin_ids": {},
+                    "reason": note,
+                    "status": "sure",
+                    "candidates": [candidate],
+                    "episode_issues": [],
+                    "excerpt_transcript": transcript,
+                },
+            )
+            return
+        for item in finding["candidates"]:
+            item["auto"] = False
+        others = [item for item in finding["candidates"] if item.get("key") != candidate.get("key")]
+        finding["candidates"] = [candidate, *others][:6]
+        finding["status"] = "sure"
+        finding["reason"] = note
+        finding["excerpt_transcript"] = transcript
 
     def _remember_stats(self) -> None:
         findings = self._state["findings"]
@@ -392,7 +467,7 @@ def _apply_body(candidate: dict) -> dict:
     if candidate.get("overview"):
         body["Overview"] = candidate["overview"]
     ids = candidate.get("provider_ids") or {}
-    if ids.get("Tmdb"):
+    if ids.get("Tmdb") or ids.get("Imdb"):
         body["SearchProviderName"] = "TheMovieDb"
     elif ids.get("Tvdb"):
         body["SearchProviderName"] = "TheTVDB"

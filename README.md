@@ -26,6 +26,7 @@ Der **Ordner** sagt, was du hast. Die **Provider-ID** sagt, welches Werk das ist
    - Jahr: gleich, ein Jahr daneben, oder Widerspruch
    - Folgen: 8 von 8 in Staffel 1 ist ein voller Treffer. Eine Datei `S01E09` kann nicht die 8-teilige Marvel-Serie sein
 7. **Sicher** nur bei hohem Score, mindestens 15 Punkten Abstand und ohne Jahreswiderspruch. `Inhumans` ohne Jahr bleibt auf „Prüfen“, auch wenn die Folgenzahl Marvel wahrscheinlicher macht.
+8. **Ausschnitt:** Button „Ausschnitt erkennen“ liest die Datei über Jellyfin. Zuerst der OpenSubtitles-Fingerabdruck (Anfang und Ende der Datei, dieselbe Idee wie ein Shazam-Signaturabgleich). Trifft der die Fassung nicht, werden 20 Sekunden Dialog transkribiert und mit den Untertiteln der Kandidaten verglichen. Ein Satz, der nur in einer Fassung vorkommt, entscheidet.
 
 Übernehmen setzt die Provider-IDs und lässt Jellyfin Metadaten und Bilder ersetzen. Bei Serien werden die Folgen danach neu geladen. Der Gesehen-Status liegt in den Benutzerdaten und bleibt.
 
@@ -66,6 +67,9 @@ Sonarr-Ordner mit Jahr, optional mit `{tvdb-ID}`, machen die Entscheidung eindeu
 | `JELLYFIN_TOKEN` | leer | Admin-API-Key |
 | `JELLYFIN_USERNAME` / `JELLYFIN_PASSWORD` | leer | Nur ohne API-Key, Benutzer muss Admin sein |
 | `TMDB_API_KEY` | leer | Optionale zweite Quelle |
+| `OPENSUBTITLES_API_KEY` | leer | Ausschnitt-Erkennung, Consumer-Key von opensubtitles.com |
+| `OPENSUBTITLES_USERNAME` / `OPENSUBTITLES_PASSWORD` | leer | Nur für den Dialog-Vergleich |
+| `WHISPER_MODEL` | `small` | Sprachmodell, erster Lauf lädt es nach Appdata |
 | `PORT` | `8792` | Port im Container |
 | `SSL_BYPASS` | `false` | `true` bei selbstsigniertem Zertifikat |
 | `PUID` / `PGID` | `99` / `100` | Unraid nobody/users |

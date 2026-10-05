@@ -4,6 +4,7 @@ import logging
 
 from flask import Flask, jsonify, render_template, request
 
+from app.excerpt import ExcerptError
 from app.jellyfin import JellyfinError
 from app.scanner import Scanner
 
@@ -69,6 +70,22 @@ def create_app() -> Flask:
         except KeyError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 404
         except (JellyfinError, RuntimeError, OSError) as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+    @app.post("/api/listen")
+    def listen():
+        payload = request.get_json(silent=True) or {}
+        item_id = str(payload.get("item_id") or "")
+        if not item_id:
+            return jsonify({"ok": False, "error": "item_id fehlt"}), 400
+        try:
+            return jsonify(scanner.listen(item_id))
+        except ExcerptError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        except KeyError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 404
+        except (JellyfinError, RuntimeError, OSError) as exc:
+            log.exception("Ausschnitt fehlgeschlagen")
             return jsonify({"ok": False, "error": str(exc)}), 400
 
     @app.post("/api/ignore")

@@ -98,6 +98,7 @@
       <summary>So wird ein Film, eine Serie und eine Folge erkannt</summary>
       <p>Der Ordner ist die Absicht, die Provider-ID die Identität. <strong>Marvel's Inhumans</strong> (2017, TMDB 68716, 8 Folgen) und <strong>Hotel Inhumans</strong> (2025, TMDB 276288, 13 Folgen) teilen sich nur das Wort Inhumans. Jellyfin übernimmt oft den ersten Suchtreffer.</p>
       <p>Die App liest Titel und Jahr aus dem Ordner, Staffel und Episode aus <code>S01E03</code> im Dateinamen. Eine ID im Ordner wie <code>{tvdb-328844}</code> gilt sofort. Danach sucht sie über die in Jellyfin eingerichteten Anbieter und bewertet jeden Treffer: fehlende und zusätzliche Wörter, Jahr, und ob die lokalen Folgen in diese Staffel passen. Nur ein klarer Abstand wird als sicher markiert. Übernehmen schreibt die IDs nach Jellyfin und lädt Metadaten neu. Der Gesehen-Status bleibt.</p>
+      <p><strong>Ausschnitt erkennen</strong> liest den Film selbst, nicht den Dateinamen. Zuerst den Fingerabdruck der Datei bei OpenSubtitles. Trifft der nicht, werden 20 Sekunden Dialog mitgeschnitten und mit den Untertiteln der möglichen Filme verglichen. Dafür brauchst du einen kostenlosen OpenSubtitles-API-Key, für den Dialog zusätzlich Benutzername und Passwort. Beim ersten Mal lädt das Sprachmodell in den Appdata-Ordner.</p>
     </details>
     <div id="errors" class="muted"></div>
     <h2 id="listTitle">Abweichungen</h2>
@@ -159,6 +160,7 @@
         bits.push(`${stats.findings || 0} abweichend`);
         bits.push(`${stats.sure || 0} sicher`);
       }
+      if (data.config && data.config.excerpt) bits.push("Ausschnitt bereit");
       document.getElementById("meta").innerHTML = bits.map((bit) => `<span class="chip">${esc(bit)}</span>`).join("");
       const problems = (stats.errors || []);
       document.getElementById("errors").textContent = problems.length ? problems.join(" ") : "";
@@ -207,16 +209,20 @@
             <div class="muted">${esc(finding.reason)}</div>
             <div class="path">${esc(finding.path)}</div>
             ${finding.episode_count ? `<div class="muted">${finding.episode_count} Folgen aus Dateinamen gelesen</div>` : ""}
+            ${finding.excerpt_transcript ? `<div class="muted">Gehört: „${esc(finding.excerpt_transcript)}“</div>` : ""}
             ${candidates || '<p class="muted">Kein passender Treffer. Ordnername oder Jahr prüfen.</p>'}
             ${issues}
-            <div class="row"><button type="button" class="secondary" data-ignore="${esc(finding.item_id)}">Ignorieren</button></div>
+            <div class="row">
+              <button type="button" class="secondary" data-listen="${esc(finding.item_id)}">Ausschnitt erkennen</button>
+              <button type="button" class="secondary" data-ignore="${esc(finding.item_id)}">Ignorieren</button>
+            </div>
           </article>
         `;
       }).join("");
     }
 
-    async function post(url, body) {
-      toast.textContent = "Bitte warten…";
+    async function post(url, body, waiting) {
+      toast.textContent = waiting || "Bitte warten…";
       const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -255,6 +261,13 @@
         if (data) toast.textContent = "Übernommen: " + data.name;
       } else if (button.dataset.ignore) {
         await post("/api/ignore", { item_id: button.dataset.ignore });
+      } else if (button.dataset.listen) {
+        const data = await post(
+          "/api/listen",
+          { item_id: button.dataset.listen },
+          "Ausschnitt wird gelesen. Beim ersten Mal lädt das Sprachmodell, das kann einige Minuten dauern."
+        );
+        if (data) toast.textContent = data.message || "Erkannt";
       } else if (button.dataset.episode) {
         const data = await post("/api/episode", { item_id: button.dataset.episode });
         if (data) toast.textContent = "Folgenindex gesetzt";

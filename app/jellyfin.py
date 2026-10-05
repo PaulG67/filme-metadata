@@ -18,6 +18,7 @@ class JellyfinError(RuntimeError):
 class JellyfinClient:
     def __init__(self, baseurl: str, token: str, verify: bool) -> None:
         self.baseurl = baseurl.rstrip("/")
+        self.token = token
         self.headers = {
             "Authorization": AUTH_HEADER,
             "X-Emby-Authorization": AUTH_HEADER,
@@ -116,6 +117,73 @@ class JellyfinClient:
             if not chunk or start >= total:
                 break
         return items
+
+    def media_item(self, item_id: str) -> dict:
+        data = self._get(
+            f"/Items/{item_id}",
+            {"Fields": "MediaSources,RunTimeTicks,Path,ProviderIds,IndexNumber,ParentIndexNumber,ProductionYear"},
+        )
+        if not isinstance(data, dict) or not data.get("Id"):
+            raise JellyfinError("Eintrag nicht gefunden")
+        return data
+
+    def static_stream_url(self, item_id: str) -> str:
+        return f"{self.baseurl}/Videos/{item_id}/stream?Static=true"
+
+    def read_edges(self, item_id: str, size: int) -> tuple[bytes, bytes]:
+        head = self._read_range(item_id, 0, 65536)
+        tail_start = max(0, size - 65536)
+        tail = self._read_range(item_id, tail_start, 65536)
+        return head, tail
+
+    def _read_range(self, item_id: str, start: int, length: int) -> bytes:
+        end = start + length - 1
+        headers = dict(self.headers)
+        headers["Range"] = f"bytes={start}-{end}"
+        try:
+            with self.http.stream(
+                "GET",
+                self.static_stream_url(item_id),
+                headers=headers,
+                timeout=40,
+            ) as response:
+                if response.status_code != 206:
+                    raise JellyfinError("Jellyfin gibt die Datei nicht abschnittsweise frei")
+                chunks: list[bytes] = []
+                remaining = length
+                for chunk in response.iter_bytes():
+                    if not chunk:
+                        continue
+                    take = chunk[:remaining]
+                    chunks.append(take)
+                    remaining -= len(take)
+                    if remaining <= 0:
+                        break
+        except JellyfinError:
+            raise
+        except Exception as exc:
+            raise JellyfinError(f"Dateiausschnitt fehlgeschlagen: {exc}") from exc
+        data = b"".join(chunks)
+        if len(data) < length:
+            raise JellyfinError("Dateiausschnitt unvollständig")
+        return data[:length]
+
+    def remote_search_provider(
+        self,
+        kind: str,
+        name: str,
+        year: int | None,
+        item_id: str,
+        provider_ids: dict[str, str],
+    ) -> list[dict]:
+        info: dict = {"Name": name or "", "ProviderIds": provider_ids}
+        if year:
+            info["Year"] = int(year)
+        path = "/Items/RemoteSearch/Series" if kind == "series" else "/Items/RemoteSearch/Movie"
+        data = self._request("POST", path, json={"SearchInfo": info, "ItemId": item_id}, timeout=90).json()
+        if isinstance(data, list):
+            return data
+        return []
 
     def episodes(self, series_id: str) -> list[dict]:
         items: list[dict] = []

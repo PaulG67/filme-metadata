@@ -19,6 +19,6 @@ exec gosu "${PUID}:${PGID}" \
     --bind "0.0.0.0:${PORT:-8792}" \
     --workers 1 \
     --threads 8 \
-    --timeout 180 \
+    --timeout 600 \
     --access-logfile - \
     --error-logfile -
