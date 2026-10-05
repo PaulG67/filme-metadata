@@ -129,6 +129,10 @@
     .badge.no_match { background: color-mix(in srgb, var(--bad) 25%, transparent); color: #fecaca; }
     .badge.kind { background: #243044; color: #d5e2ff; }
     .path { font-family: ui-monospace, Consolas, monospace; font-size: .78rem; color: var(--muted); word-break: break-all; }
+    .where { margin: .45rem 0 .8rem; }
+    .where .path { margin: .12rem 0; }
+    .where .label { display: inline-block; min-width: 4.4rem; font-family: "Segoe UI", system-ui, sans-serif; font-size: .72rem; font-weight: 700; }
+    .where .name { color: var(--text); }
     .candidate { border-top: 1px solid var(--line); padding-top: .7rem; margin-top: .7rem; }
     .notes { margin: .35rem 0 .5rem; padding-left: 1.1rem; color: var(--muted); }
     .empty { padding: 1.5rem 1rem; text-align: center; color: var(--muted); border: 1px dashed var(--line); border-radius: 12px; }
@@ -394,6 +398,29 @@
       return changedFields(finding).length > 0 || (finding.episode_issues || []).length > 0;
     }
 
+    function locationOf(path) {
+      const text = String(path || "").replace(/\\/g, "/").replace(/\/+$/, "");
+      if (!text) return null;
+      const slash = text.lastIndexOf("/");
+      const name = slash >= 0 ? text.slice(slash + 1) : text;
+      const parent = slash >= 0 ? text.slice(0, slash) : "";
+      const file = /\.[A-Za-z0-9]{1,8}$/.test(name);
+      return { path: file ? parent : text, name, file };
+    }
+
+    function fileName(path) {
+      const place = locationOf(path);
+      return place && place.file ? place.name : "";
+    }
+
+    function locationBlock(path) {
+      const place = locationOf(path);
+      if (!place || !place.name) return "";
+      const label = place.file ? "Datei" : "Ordner";
+      const folder = place.path ? `<div class="path"><span class="label">Pfad</span> ${esc(place.path)}</div>` : "";
+      return `<div class="where">${folder}<div class="path"><span class="label">${label}</span> <span class="name">${esc(place.name)}</span></div></div>`;
+    }
+
     function posterFigures(finding) {
       const proposal = proposalOf(finding);
       const current = `<figure><img data-poster alt="" src="/api/poster/${encodeURIComponent(finding.item_id)}?side=current"><figcaption>Jetzt in Jellyfin</figcaption></figure>`;
@@ -455,7 +482,7 @@
       if (!issues.length) return "";
       const body = issues.slice(0, 8).map((issue) => `
         <tr class="changed">
-          <td class="k">${esc(issue.name || "Folge")}</td>
+          <td class="k">${esc(issue.name || "Folge")}${fileName(issue.path) ? `<div class="path">${esc(fileName(issue.path))}</div>` : ""}</td>
           <td class="value before">S${pad(issue.jellyfin_season)}E${pad(issue.jellyfin_episode)}</td>
           <td class="value after">S${pad(issue.expected_season)}E${pad(issue.expected_episode)}
             <button type="button" class="secondary" data-episode="${esc(issue.item_id)}">Index setzen</button>
@@ -516,6 +543,7 @@
             ${proposalLabel ? `<span class="arrow">→</span><span class="after">${esc(proposalLabel)}</span>` : ""}
           </h3>
           <div class="muted">${esc(finding.reason || "")}</div>
+          ${locationBlock(finding.path)}
           ${posterFigures(finding)}
           ${compareTable(finding)}
           ${finding.excerpt_transcript ? `<div class="muted">Gehört: „${esc(finding.excerpt_transcript)}“</div>` : ""}
@@ -569,7 +597,7 @@
       box.innerHTML = `
         <div class="pick">
           <h3><span class="badge kind">${kindLabel(item.type)}</span> ${esc(where + (item.name || ""))}${esc(index)}</h3>
-          <div class="path">${esc(item.path || "")}</div>
+          ${locationBlock(item.path)}
           ${extra}
           <div class="row">
             <button type="button" data-listen="${esc(item.id)}">Ausschnitt erkennen</button>

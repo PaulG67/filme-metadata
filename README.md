@@ -10,7 +10,7 @@ Beispiel: der Ordner heisst `Marvel's Inhumans (2017)`, Jellyfin zeigt **Hotel I
 | TMDB | 68716 | 276288 |
 | Staffel 1 | 8 Folgen | 13 Folgen |
 
-Die App schreibt nichts von selbst. In der Web-UI siehst du den Vorschlag, das aktuelle Jellyfin-Plakat und das Plakat der neuen Fassung, und setzt die Fassung mit einem Button in Jellyfin, Plex oder beide. TMDB, IMDb und TVDB sind anklickbar: dann erscheinen Beschreibung, Besetzung und, mit TMDB-Key, der Trailer.
+Die App schreibt nichts von selbst. In der Web-UI siehst du den Vorschlag, Pfad und Dateiname, das aktuelle Jellyfin-Plakat und das Plakat der neuen Fassung, und setzt die Fassung mit einem Button in Jellyfin, Plex oder beide. TMDB, IMDb und TVDB sind anklickbar: dann erscheinen Beschreibung, Besetzung und, mit TMDB-Key, der Trailer.
 
 ## So wird identifiziert
 
