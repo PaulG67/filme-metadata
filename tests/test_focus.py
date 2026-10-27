@@ -140,15 +140,31 @@ def test_library_overview_filters_kind_poster_and_name(monkeypatch, tmp_path):
 def test_checking_a_selection_adds_its_findings(monkeypatch, tmp_path):
     fake = FakeClient(has_image=False)
     scanner = _scanner(monkeypatch, tmp_path, fake)
+    scanner.focus("scandal")
     result = scanner.check_items(["scandal"])
     assert result["found"] == ["Scandal"]
-    assert scanner.status()["findings"][0]["missing_poster"] is True
+    status = scanner.status()
+    assert status["findings"][0]["missing_poster"] is True
+    assert status["focus"] is None
+    assert [item["item_id"] for item in status["selection"]] == ["scandal"]
+    scanner.clear_focus()
+    assert scanner.status()["selection"] == []
     try:
         scanner.check_items([str(index) for index in range(51)])
     except RuntimeError as exc:
         assert "50" in str(exc)
     else:
         raise AssertionError("more than 50 titles were accepted")
+
+
+def test_matching_titles_also_show_in_the_checked_selection(monkeypatch, tmp_path):
+    scanner = _scanner(monkeypatch, tmp_path, FakeClient(has_image=True))
+    result = scanner.check_items(["scandal"])
+    assert result["clean"] == ["Scandal"]
+    status = scanner.status()
+    assert status["findings"] == []
+    assert status["selection"][0]["manual"] is True
+    assert scanner._lookup("scandal") is not None
 
 
 class SearchingClient(FakeClient):

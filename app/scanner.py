@@ -58,6 +58,7 @@ class Scanner:
             "ignored": [],
             "accepted": {"jellyfin": {}, "plex": {}},
             "focus": None,
+            "selection": [],
         }
         self._library_cache: tuple[float, list[dict]] | None = None
         self._load()
@@ -69,7 +70,7 @@ class Scanner:
         focus = self._state.get("focus")
         if focus is not None and focus["item_id"] == item_id:
             return focus
-        return None
+        return next((item for item in self._state["selection"] if item["item_id"] == item_id), None)
 
     def status(self) -> dict:
         settings = load_settings()
@@ -85,6 +86,7 @@ class Scanner:
                 "stats": dict(self._state["stats"]),
                 "findings": [_public_finding(item) for item in self._state["findings"]],
                 "focus": _public_finding(self._state["focus"]) if self._state.get("focus") else None,
+                "selection": [_public_finding(item) for item in self._state["selection"]],
                 "ignored_count": len(self._state["ignored"]),
                 "accepted_count": sum(len(bucket) for bucket in self._state["accepted"].values()),
             }
@@ -361,6 +363,7 @@ class Scanner:
                 self._remember_stats()
                 self._save()
             self._state["focus"] = finding
+            self._state["selection"] = []
         return {"ok": True, "clean": clean, "item": summary, "issue": None, "finding": _public_finding(finding)}
 
     def research(self, item_id: str, term: str, year: int | None) -> dict:
@@ -403,9 +406,11 @@ class Scanner:
             self._save()
             return {"ok": True, "count": len(public), "finding": _public_finding(current)}
 
-    def clear_focus(self) -> None:
+    def clear_focus(self, everything: bool = True) -> None:
         with self._lock:
             self._state["focus"] = None
+            if everything:
+                self._state["selection"] = []
 
     def poster_options(self, item_id: str, key: str) -> list[dict]:
         with self._lock:
@@ -533,25 +538,37 @@ class Scanner:
         found: list[str] = []
         clean: list[str] = []
         errors: list[str] = []
+        selection: list[dict] = []
         for item_id in item_ids:
             try:
                 item = client.media_item(item_id)
                 if not is_media_item(item):
                     continue
                 finding, _outcome = self._inspect(client, tmdb, item, plex_index)
+                manual = finding is None
+                if manual:
+                    finding = _manual_finding(client, tmdb, item)
             except (JellyfinError, RuntimeError, OSError) as exc:
                 errors.append(f"{item_id}: {exc}")
                 continue
             name = item.get("Name") or item_id
-            if finding is None:
+            if manual:
                 clean.append(name)
+            else:
+                found.append(name)
+            if finding is None:
                 continue
-            found.append(name)
+            selection.append(finding)
+            if manual:
+                continue
             with self._lock:
                 rest = [entry for entry in self._state["findings"] if entry["item_id"] != finding["item_id"]]
                 self._state["findings"] = [finding, *rest]
                 self._state["ignored"] = [entry for entry in self._state["ignored"] if entry != finding["item_id"]]
+        selection.sort(key=lambda entry: bool(entry.get("manual")))
         with self._lock:
+            self._state["focus"] = None
+            self._state["selection"] = selection
             self._remember_stats()
             self._save()
         return {"ok": True, "found": found, "clean": clean, "errors": errors}

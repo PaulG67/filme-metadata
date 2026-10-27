@@ -167,7 +167,8 @@ def create_app() -> Flask:
 
     @app.post("/api/focus/clear")
     def clear_focus():
-        scanner.clear_focus()
+        payload = request.get_json(silent=True) or {}
+        scanner.clear_focus(payload.get("all") is not False)
         return jsonify({"ok": True})
 
     @app.get("/api/posters/<item_id>")

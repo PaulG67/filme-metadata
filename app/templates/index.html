@@ -689,7 +689,10 @@
       const jellyLabel = workLabel(finding.jellyfin_name, finding.jellyfin_year);
       const plexLabel = finding.plex ? workLabel(finding.plex.name, finding.plex.year) : "";
       const proposalLabel = proposal ? workLabel(proposal.name, proposal.year) : "";
-      const focused = Boolean(lastStatus && lastStatus.focus && lastStatus.focus.item_id === finding.item_id);
+      const focused = Boolean(lastStatus && (
+        (lastStatus.focus && lastStatus.focus.item_id === finding.item_id)
+        || (lastStatus.selection || []).some((item) => item.item_id === finding.item_id)
+      ));
       const otherList = (finding.candidates || []).slice(1).filter((item) => item.key !== "side:jellyfin" && item.key !== "side:plex");
       const others = (otherList.length ? `<h4 class="others-head">Weitere Treffer</h4>` : "") + otherList.map((item) => `
         <div class="candidate">
@@ -792,14 +795,29 @@
       const hiddenCollections = hidingCollections() ? adjustable.filter((item) => item.collection).length : 0;
       const openCount = adjustable.length - hiddenCollections;
       document.getElementById("tabCount").textContent = openCount ? `(${openCount})` : "";
+      const selection = data.selection || [];
       if (data.focus) {
         shownFindings = { [data.focus.item_id]: data.focus };
         list.innerHTML = `
           <div class="focus-bar">
-            <h2>Gesuchter Titel</h2>
-            <button type="button" class="secondary" data-back="1">← Zurück zur Liste</button>
+            <h2>Gewählter Titel</h2>
+            <button type="button" class="secondary" data-back="focus">${selection.length ? "← Zurück zur Auswahl" : (returnTab === "library" ? "← Zurück zur Bibliothek" : "← Zurück zur Liste")}</button>
           </div>
           ${changeCard(data.focus)}`;
+        return;
+      }
+      if (selection.length) {
+        selection.forEach(preferCandidate);
+        shownFindings = Object.fromEntries(selection.map((item) => [item.item_id, item]));
+        const open = selection.filter((item) => !item.manual);
+        const fine = selection.filter((item) => item.manual);
+        list.innerHTML = `
+          <div class="focus-bar">
+            <h2>Geprüfte Auswahl (${selection.length})</h2>
+            <button type="button" class="secondary" data-back="selection">${returnTab === "library" ? "← Zurück zur Bibliothek" : "← Zurück zur Liste"}</button>
+          </div>
+          ${open.length ? `<h2>Mit Vorschlag (${open.length})</h2><p class="section-note muted">Diese Titel stehen auch in der normalen Liste.</p>${open.map(changeCard).join("")}` : ""}
+          ${fine.length ? `<h2>Passen (${fine.length})</h2><p class="section-note muted">Keine Abweichung gefunden. Mit „Nach Anpassungen suchen“ oder „Anderes Plakat wählen“ kannst du trotzdem etwas ändern.</p>${fine.map(changeCard).join("")}` : ""}`;
         return;
       }
       const findings = adjustable.filter((item) => !(hiddenCollections && item.collection));
@@ -1236,21 +1254,25 @@
       busy = true;
       const button = document.getElementById("libCheck");
       button.disabled = true;
-      button.textContent = "Prüfe…";
-      showNotice(`Prüfe ${ids.length} ${ids.length === 1 ? "Titel" : "Titel"}. Das dauert je Titel einige Sekunden…`, "busy");
+      button.textContent = `Prüfe ${ids.length} Titel…`;
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      showNotice(`Prüfe ${ids.length} Titel. Das dauert je Titel einige Sekunden, bitte warten…`, "busy");
       try {
         const data = await post("/api/check", { item_ids: ids });
         if (!data) return;
         library.selected.clear();
+        library.loaded = false;
         const found = data.found || [];
         const clean = data.clean || [];
         const parts = [];
         if (found.length) parts.push(`${found.length} mit Vorschlag`);
         if (clean.length) parts.push(`${clean.length} passen`);
         if ((data.errors || []).length) parts.push(`${data.errors.length} nicht lesbar`);
-        showNotice(`Geprüft: ${parts.join(", ") || "nichts"}.${found.length ? " Die Vorschläge stehen im Reiter „Vorschläge“." : ""}`, found.length ? "ok" : "");
+        showNotice(`Geprüft: ${parts.join(", ") || "nichts"}.`, found.length ? "ok" : "");
+        returnTab = "library";
         await load();
-        await loadLibrary(true);
+        showTab("list");
+        window.scrollTo({ top: 0, behavior: "smooth" });
       } finally {
         busy = false;
         updateSelection();
@@ -1355,9 +1377,11 @@
         return;
       }
       if (button.dataset.back) {
-        await post("/api/focus/clear");
+        const toSelection = button.dataset.back === "focus" && lastStatus && (lastStatus.selection || []).length > 0;
+        await post("/api/focus/clear", { all: !toSelection });
         showNotice("", "");
         await load();
+        if (toSelection) return;
         if (returnTab === "library") {
           showTab("library");
           await loadLibrary(true);
