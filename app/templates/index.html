@@ -125,7 +125,7 @@
       font-weight: 700;
     }
     .badge.sure { background: color-mix(in srgb, var(--ok) 25%, transparent); color: #b6f3d4; }
-    .badge.review, .badge.split { background: color-mix(in srgb, var(--warn) 22%, transparent); color: #f8e3a3; }
+    .badge.review, .badge.split, .badge.poster { background: color-mix(in srgb, var(--warn) 22%, transparent); color: #f8e3a3; }
     .badge.no_match { background: color-mix(in srgb, var(--bad) 25%, transparent); color: #fecaca; }
     .badge.kind { background: #243044; color: #d5e2ff; }
     .path { font-family: ui-monospace, Consolas, monospace; font-size: .78rem; color: var(--muted); word-break: break-all; }
@@ -209,6 +209,7 @@
       if (status === "sure") return "Sicher";
       if (status === "split") return "Abweichung";
       if (status === "no_match") return "Kein Treffer";
+      if (status === "poster") return "Plakat";
       return "Prüfen";
     }
 
@@ -395,7 +396,7 @@
     }
 
     function hasAdjustment(finding) {
-      return changedFields(finding).length > 0 || (finding.episode_issues || []).length > 0;
+      return finding.missing_poster || changedFields(finding).length > 0 || (finding.episode_issues || []).length > 0;
     }
 
     function locationOf(path) {
@@ -540,7 +541,7 @@
             <span class="badge ${esc(finding.status)}">${statusLabel(finding.status)}</span>
             <span class="before">${esc(jellyLabel)}</span>
             ${plexLabel ? `<span class="arrow">·</span><span class="plex">${esc(plexLabel)}</span>` : ""}
-            ${proposalLabel ? `<span class="arrow">→</span><span class="after">${esc(proposalLabel)}</span>` : ""}
+            ${proposalLabel && proposalLabel !== jellyLabel ? `<span class="arrow">→</span><span class="after">${esc(proposalLabel)}</span>` : ""}
           </h3>
           <div class="muted">${esc(finding.reason || "")}</div>
           ${locationBlock(finding.path)}
@@ -563,8 +564,9 @@
       }
       const groups = [
         ["Sicher", findings.filter((item) => item.status === "sure"), "Diese Vorschläge schreibt der grüne Button oben. Markierte Angaben bleiben."],
-        ["Plex weicht ab", findings.filter((item) => item.status === "split"), "Wähle, welches System die Angaben übernimmt."],
-        ["Prüfen", findings.filter((item) => item.status !== "sure" && item.status !== "split"), "Noch nicht eindeutig. Nichts wird automatisch geschrieben."]
+        ["Ohne Plakat", findings.filter((item) => item.missing_poster), "Die Zuordnung bleibt. Setzen lädt das Cover der genannten Fassung."],
+        ["Plex weicht ab", findings.filter((item) => item.status === "split" && !item.missing_poster), "Wähle, welches System die Angaben übernimmt."],
+        ["Prüfen", findings.filter((item) => item.status !== "sure" && item.status !== "split" && !item.missing_poster), "Noch nicht eindeutig. Nichts wird automatisch geschrieben."]
       ];
       list.innerHTML = groups.filter((group) => group[1].length).map(([title, items, note]) => `
         <h2>${esc(title)}</h2>
@@ -618,7 +620,8 @@
       box.innerHTML = items.map((item) => {
         const where = item.series ? `${item.series} · ` : "";
         const index = item.type === "episode" ? ` S${pad(item.season)}E${pad(item.episode)}` : yearOf(item.year);
-        return `<button type="button" data-choose="${esc(item.id)}"><span class="badge kind">${kindLabel(item.type)}</span><span>${esc(where + item.name)}${esc(index)}</span></button>`;
+        const poster = item.type !== "episode" && item.has_poster === false ? `<span class="muted">kein Plakat</span>` : "";
+        return `<button type="button" data-choose="${esc(item.id)}"><span class="badge kind">${kindLabel(item.type)}</span><span>${esc(where + item.name)}${esc(index)}</span>${poster}</button>`;
       }).join("");
     }
 

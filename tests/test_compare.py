@@ -110,3 +110,16 @@ def test_accepted_jellyfin_stays_open_while_plex_differs():
     assert still_open(finding) is True
     finding["plex"]["accepted"] = True
     assert still_open(finding) is False
+
+
+def test_missing_poster_stays_open_until_jellyfin_is_accepted():
+    finding = {
+        "missing_poster": True,
+        "jellyfin_accepted": False,
+        "jellyfin_name": "Under the Dome",
+        "jellyfin_year": 2013,
+        "jellyfin_ids": {"Tmdb": "26487"},
+    }
+    assert still_open(finding) is True
+    finding["jellyfin_accepted"] = True
+    assert still_open(finding) is False

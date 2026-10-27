@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from app.config import Settings, load_settings
 from app.identify import (
+    Candidate,
     build_finding,
     candidate_key,
     jellyfin_provider_ids,
@@ -22,8 +23,9 @@ from app.identify import (
     rank_candidates,
     same_work,
     systems_differ,
+    _public_candidate,
 )
-from app.jellyfin import JellyfinClient, JellyfinError, candidate_from_jellyfin
+from app.jellyfin import JellyfinClient, JellyfinError, candidate_from_jellyfin, has_primary_image
 from app.plex import PlexClient, PlexError, PlexIndex
 from app.posters import fetch_poster, poster_url
 from app.tmdb import TmdbClient
@@ -541,9 +543,27 @@ class Scanner:
                 plex_item.get("year"),
                 plex_item.get("ids"),
             )
-        if finding is None:
-            if not differ:
+        if finding is None and not differ and (jelly_locked or has_primary_image(item)):
+            return None, "ok"
+        if finding is None and not differ:
+            finding = _poster_finding(
+                client,
+                tmdb,
+                item_id=item["Id"],
+                kind=kind,
+                path=path,
+                folder_title=title,
+                folder_year=year,
+                jellyfin_name=jellyfin_name,
+                jellyfin_year=jellyfin_year,
+                jellyfin_ids=jellyfin_ids,
+                jellyfin_original=(item.get("OriginalTitle") or "").strip(),
+                jellyfin_overview=(item.get("Overview") or "").strip()[:400],
+                embedded=embedded,
+            )
+            if finding is None:
                 return None, "ok"
+        elif finding is None:
             finding = _split_finding(
                 item_id=item["Id"],
                 kind=kind,
@@ -709,6 +729,59 @@ def _poster_candidate(finding: dict, key: str) -> dict:
     return candidates[0]
 
 
+def _poster_finding(
+    client: JellyfinClient,
+    tmdb: TmdbClient | None,
+    *,
+    item_id: str,
+    kind: str,
+    path: str,
+    folder_title: str,
+    folder_year: int | None,
+    jellyfin_name: str,
+    jellyfin_year: int | None,
+    jellyfin_ids: dict,
+    jellyfin_original: str,
+    jellyfin_overview: str,
+    embedded: dict,
+) -> dict | None:
+    found = _search(client, tmdb, kind, folder_title, folder_year, item_id)
+    ranked = rank_candidates(folder_title, folder_year, None, found, embedded)
+    chosen = next((item for item in ranked if same_work(jellyfin_ids, item.provider_ids)), None)
+    if chosen is None and norm_provider_ids(jellyfin_ids):
+        chosen = Candidate(
+            name=jellyfin_name or folder_title,
+            year=jellyfin_year or folder_year,
+            provider_ids=norm_provider_ids(jellyfin_ids),
+            source="jellyfin",
+        )
+    elif chosen is None and ranked:
+        chosen = ranked[0]
+    if chosen is None:
+        return None
+    public = _public_candidate(chosen)
+    public["auto"] = False
+    return {
+        "item_id": item_id,
+        "kind": kind,
+        "path": path,
+        "folder_title": folder_title,
+        "folder_year": folder_year,
+        "jellyfin_name": jellyfin_name,
+        "jellyfin_year": jellyfin_year,
+        "jellyfin_ids": jellyfin_provider_ids(norm_provider_ids(jellyfin_ids)),
+        "jellyfin_original": jellyfin_original,
+        "jellyfin_overview": jellyfin_overview,
+        "jellyfin_accepted": False,
+        "reason": "Kein Plakat in Jellyfin",
+        "status": "poster",
+        "missing_poster": True,
+        "candidates": [public],
+        "episode_issues": [],
+        "episode_count": 0,
+    }
+
+
 def _apply_excerpt(finding: dict, payload: dict) -> None:
     finding["excerpt_transcript"] = payload.get("transcript") or ""
     if payload.get("clip_id"):
@@ -728,6 +801,7 @@ def library_hit(item: dict) -> dict:
         "season": item.get("ParentIndexNumber"),
         "episode": item.get("IndexNumber"),
         "path": item.get("Path") or "",
+        "has_poster": has_primary_image(item),
     }
 
 
@@ -870,6 +944,8 @@ def _public_finding(finding: dict) -> dict:
 
 
 def still_open(finding: dict) -> bool:
+    if finding.get("missing_poster") and not finding.get("jellyfin_accepted"):
+        return True
     plex = finding.get("plex")
     jelly_open = not finding.get("jellyfin_accepted")
     if not plex:
@@ -917,6 +993,7 @@ def _remember_written(accepted: dict, finding: dict, candidate: dict, targets: l
         finding["jellyfin_ids"] = ids
         finding["jellyfin_overview"] = candidate.get("overview") or ""
         finding["jellyfin_original"] = candidate.get("original_name") or ""
+        finding["missing_poster"] = False
     plex = finding.get("plex")
     if "plex" in targets and plex:
         accepted["plex"][plex["item_id"]] = signature

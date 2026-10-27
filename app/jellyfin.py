@@ -1,10 +1,27 @@
 from __future__ import annotations
 
+import re
 import time
 
 import httpx
 
 from app.identify import Candidate
+
+
+def compact_name(value: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (value or "").casefold())
+
+
+def matches_compact(query: str, *names: str) -> bool:
+    needle = compact_name(query)
+    if len(needle) < 4:
+        return False
+    return any(needle in compact_name(name) for name in names if name)
+
+
+def has_primary_image(item: dict) -> bool:
+    tags = item.get("ImageTags") or {}
+    return bool(isinstance(tags, dict) and tags.get("Primary"))
 
 
 def clean_token(value: str) -> str:
@@ -148,7 +165,7 @@ class JellyfinClient:
                 {
                     "Recursive": "true",
                     "IncludeItemTypes": "Series,Movie",
-                    "Fields": "ProviderIds,Path,ProductionYear,OriginalTitle,PremiereDate,Overview",
+                    "Fields": "ProviderIds,Path,ProductionYear,OriginalTitle,PremiereDate,Overview,ImageTags",
                     "StartIndex": str(start),
                     "Limit": "200",
                 },
@@ -173,14 +190,21 @@ class JellyfinClient:
                 "SearchTerm": query,
                 "Recursive": "true",
                 "IncludeItemTypes": "Movie,Series,Episode",
-                "Fields": "Path,ProductionYear,PremiereDate,IndexNumber,ParentIndexNumber,SeriesName",
+                "Fields": "Path,ProductionYear,PremiereDate,IndexNumber,ParentIndexNumber,SeriesName,OriginalTitle,ImageTags",
                 "Limit": "20",
                 "EnableTotalRecordCount": "false",
             },
         )
-        if not isinstance(page, dict):
-            return []
-        return [item for item in (page.get("Items") or []) if item.get("Id")]
+        hits = [item for item in ((page.get("Items") or []) if isinstance(page, dict) else []) if item.get("Id")]
+        if hits or " " in query:
+            return hits
+        matched = []
+        for item in self.list_media():
+            if matches_compact(query, item.get("Name") or "", item.get("OriginalTitle") or "", item.get("Path") or ""):
+                matched.append(item)
+            if len(matched) >= 20:
+                break
+        return matched
 
     def library_user_id(self) -> str:
         if self._user_id:
@@ -209,7 +233,7 @@ class JellyfinClient:
     def media_item(self, item_id: str) -> dict:
         return self.item_record(
             item_id,
-            "MediaSources,RunTimeTicks,Path,ProviderIds,IndexNumber,ParentIndexNumber,ProductionYear,Overview,OriginalTitle,SeriesName,SeriesId,PremiereDate",
+            "MediaSources,RunTimeTicks,Path,ProviderIds,IndexNumber,ParentIndexNumber,ProductionYear,Overview,OriginalTitle,SeriesName,SeriesId,PremiereDate,ImageTags",
         )
 
     def primary_image(self, item_id: str) -> tuple[bytes, str] | None:

@@ -66,6 +66,17 @@ def test_item_read_sends_the_admin_user_id(monkeypatch):
     client.http.close()
 
 
+def test_compact_search_matches_a_title_without_spaces():
+    from app.jellyfin import has_primary_image, matches_compact
+
+    assert matches_compact("underthedome", "Under the Dome")
+    assert matches_compact("under the dome", "Under the Dome (2013)")
+    assert not matches_compact("dom", "Under the Dome")
+    assert has_primary_image({"ImageTags": {"Primary": "abc"}})
+    assert not has_primary_image({"ImageTags": {}})
+    assert not has_primary_image({})
+
+
 def test_clip_route_serves_only_a_local_preview(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     from app.main import create_app
