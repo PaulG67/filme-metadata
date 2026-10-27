@@ -119,6 +119,22 @@ def create_app() -> Flask:
         except (JellyfinError, RuntimeError, OSError) as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
 
+    @app.post("/api/focus/clear")
+    def clear_focus():
+        scanner.clear_focus()
+        return jsonify({"ok": True})
+
+    @app.get("/api/posters/<item_id>")
+    def poster_options(item_id: str):
+        try:
+            options = scanner.poster_options(item_id, str(request.args.get("key") or ""))
+        except KeyError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 404
+        except (JellyfinError, OSError, RuntimeError, httpx.HTTPError) as exc:
+            log.warning("Plakatauswahl nicht geladen: %s", exc)
+            return jsonify({"ok": False, "error": "Plakate nicht geladen"}), 400
+        return jsonify({"ok": True, "options": options})
+
     @app.post("/api/apply")
     def apply():
         payload = request.get_json(silent=True) or {}
@@ -128,6 +144,7 @@ def create_app() -> Flask:
                 str(payload.get("key") or ""),
                 _targets(payload.get("targets")),
                 _fields(payload.get("fields")),
+                str(payload.get("poster") or "") or None,
             )
         except KeyError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 404

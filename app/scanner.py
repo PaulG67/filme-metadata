@@ -19,6 +19,7 @@ from app.identify import (
     parse_movie_path,
     parse_series_path,
     parse_title_and_ids,
+    is_collection_name,
     is_generic_dir,
     rank_candidates,
     same_work,
@@ -51,8 +52,18 @@ class Scanner:
             "findings": [],
             "ignored": [],
             "accepted": {"jellyfin": {}, "plex": {}},
+            "focus": None,
         }
         self._load()
+
+    def _lookup(self, item_id: str) -> dict | None:
+        found = next((item for item in self._state["findings"] if item["item_id"] == item_id), None)
+        if found is not None:
+            return found
+        focus = self._state.get("focus")
+        if focus is not None and focus["item_id"] == item_id:
+            return focus
+        return None
 
     def status(self) -> dict:
         settings = load_settings()
@@ -67,6 +78,7 @@ class Scanner:
                 "server_name": self._state["server_name"],
                 "stats": dict(self._state["stats"]),
                 "findings": [_public_finding(item) for item in self._state["findings"]],
+                "focus": _public_finding(self._state["focus"]) if self._state.get("focus") else None,
                 "ignored_count": len(self._state["ignored"]),
                 "accepted_count": sum(len(bucket) for bucket in self._state["accepted"].values()),
             }
@@ -128,6 +140,7 @@ class Scanner:
         candidate_key: str,
         targets: list[str] | None = None,
         fields: list[str] | None = None,
+        poster: str | None = None,
     ) -> dict:
         chosen = [target for target in (targets or ["jellyfin"]) if target in {"jellyfin", "plex"}]
         if not chosen:
@@ -137,10 +150,17 @@ class Scanner:
             picked = [field for field in FIELD_KEYS if field in fields]
             if not picked:
                 raise RuntimeError("Nichts zum Übernehmen ausgewählt")
+        chosen_poster = ""
+        if poster:
+            chosen_poster = poster_url(poster)
+            if not chosen_poster:
+                raise RuntimeError("Dieses Plakat lässt sich nicht laden")
+            if picked is not None and "poster" not in picked:
+                chosen_poster = ""
         with self._lock:
             if self._state["running"]:
                 raise RuntimeError("Scan läuft noch")
-            finding = next((item for item in self._state["findings"] if item["item_id"] == item_id), None)
+            finding = self._lookup(item_id)
             if finding is None:
                 raise KeyError("Eintrag nicht gefunden")
             if candidate_key == "side:jellyfin":
@@ -165,9 +185,13 @@ class Scanner:
                 client.unlock(item_id)
                 client.apply_remote(item_id, body)
                 if kind == "series":
-                    client.refresh(item_id)
+                    client.refresh(item_id, images=not chosen_poster)
+                if chosen_poster:
+                    client.download_poster(item_id, chosen_poster)
             else:
-                url = self._poster_for(client, settings, snapshot, candidate) if "poster" in picked else ""
+                url = ""
+                if "poster" in picked:
+                    url = chosen_poster or self._poster_for(client, settings, snapshot, candidate)
                 client.unlock(item_id)
                 changes = _field_changes(candidate, picked)
                 if changes:
@@ -176,7 +200,7 @@ class Scanner:
                     client.download_poster(item_id, url)
                 written = _merged_values(_side_values(snapshot, "jellyfin"), candidate, picked)
             with self._lock:
-                current = next((item for item in self._state["findings"] if item["item_id"] == item_id), None)
+                current = self._lookup(item_id)
                 if current is not None:
                     _remember_written(self._state["accepted"], current, written, ["jellyfin"])
                     if not still_open(current):
@@ -195,13 +219,14 @@ class Scanner:
                 plex = PlexClient(settings.plex_baseurl, settings.plex_token, settings.verify_tls)
                 try:
                     plex.match(plex_id, candidate.get("name") or "", candidate.get("year"), candidate.get("provider_ids") or {})
+                    if chosen_poster:
+                        plex.set_poster(plex_id, chosen_poster)
                 finally:
                     plex.close()
             else:
                 url = ""
                 if "poster" in picked:
-                    client = _client(settings)
-                    url = self._poster_for(client, settings, snapshot, candidate)
+                    url = chosen_poster or self._poster_for(_client(settings), settings, snapshot, candidate)
                 written = _merged_values(_side_values(snapshot, "plex"), candidate, picked)
                 changes = _field_changes(candidate, picked)
                 plex = PlexClient(settings.plex_baseurl, settings.plex_token, settings.verify_tls)
@@ -217,7 +242,7 @@ class Scanner:
                 finally:
                     plex.close()
             with self._lock:
-                current = next((item for item in self._state["findings"] if item["item_id"] == item_id), None)
+                current = self._lookup(item_id)
                 if current is not None:
                     _remember_written(self._state["accepted"], current, written, ["plex"])
                     if not still_open(current):
@@ -237,7 +262,7 @@ class Scanner:
         if any(item not in {"jellyfin", "plex"} for item in systems):
             raise RuntimeError("Unbekanntes System")
         with self._lock:
-            finding = next((item for item in self._state["findings"] if item["item_id"] == item_id), None)
+            finding = self._lookup(item_id)
             if finding is None:
                 raise KeyError("Eintrag nicht gefunden")
             if "plex" in systems and not finding.get("plex"):
@@ -311,16 +336,71 @@ class Scanner:
         summary = library_hit(item)
         if item.get("Type") == "Episode":
             return {"ok": True, "clean": episode_mismatch(item) is None, "item": summary, "issue": episode_mismatch(item)}
+        if not is_media_item(item):
+            raise RuntimeError("Nur Filme, Serien und Folgen lassen sich prüfen")
         tmdb = TmdbClient(settings.tmdb_api_key) if settings.tmdb_api_key else None
         finding, _outcome = self._inspect(client, tmdb, item, None)
+        clean = finding is None
+        if clean:
+            finding = _manual_finding(client, tmdb, item)
         if finding is None:
-            return {"ok": True, "clean": True, "item": summary, "issue": None}
+            return {"ok": True, "clean": True, "item": summary, "issue": None, "finding": None}
         with self._lock:
-            rest = [entry for entry in self._state["findings"] if entry["item_id"] != finding["item_id"]]
-            self._state["findings"] = [finding, *rest]
-            self._remember_stats()
-            self._save()
-        return {"ok": True, "clean": False, "item": summary, "issue": None}
+            if not clean:
+                rest = [entry for entry in self._state["findings"] if entry["item_id"] != finding["item_id"]]
+                self._state["findings"] = [finding, *rest]
+                self._remember_stats()
+                self._save()
+            self._state["focus"] = finding
+        return {"ok": True, "clean": clean, "item": summary, "issue": None, "finding": _public_finding(finding)}
+
+    def clear_focus(self) -> None:
+        with self._lock:
+            self._state["focus"] = None
+
+    def poster_options(self, item_id: str, key: str) -> list[dict]:
+        with self._lock:
+            finding = self._lookup(item_id)
+            if finding is None:
+                raise KeyError("Eintrag nicht gefunden")
+            candidate = dict(_poster_candidate(finding, key))
+            snapshot = dict(finding)
+        settings = load_settings()
+        kind = "movie" if snapshot.get("kind") == "movie" else "series"
+        ids = candidate.get("provider_ids") or {}
+        options: list[dict] = []
+        seen: set[str] = set()
+
+        def add(url: str | None, thumb: str | None, language: str, source: str) -> None:
+            clean = poster_url(url)
+            if not clean or clean in seen:
+                return
+            seen.add(clean)
+            options.append(
+                {"url": clean, "thumb": poster_url(thumb) or clean, "language": language or "", "source": source}
+            )
+
+        add(candidate.get("poster"), None, "", "Vorschlag")
+        if same_work(ids, snapshot.get("jellyfin_ids")):
+            client = _client(settings)
+            try:
+                for image in client.remote_posters(item_id):
+                    add(image.get("Url"), image.get("ThumbnailUrl"), image.get("Language") or "", image.get("ProviderName") or "Jellyfin")
+            except JellyfinError as exc:
+                log.warning("Plakate aus Jellyfin: %s", exc)
+            finally:
+                client.http.close()
+        tmdb_id = str(ids.get("Tmdb") or "")
+        if settings.tmdb_api_key and tmdb_id.isdigit():
+            tmdb = TmdbClient(settings.tmdb_api_key)
+            try:
+                for image in tmdb.posters(kind, tmdb_id):
+                    add(image["url"], image["thumb"], image["language"], image["source"])
+            except Exception:
+                log.warning("TMDB-Plakate nicht geladen", exc_info=True)
+            finally:
+                tmdb.http.close()
+        return options[:36]
 
     def preview(self, item_id: str) -> dict:
         from app.listen import playback_source, save_clip
@@ -341,7 +421,7 @@ class Scanner:
             if side != "proposal":
                 raise KeyError("Unbekannte Seite")
             with self._lock:
-                finding = next((item for item in self._state["findings"] if item["item_id"] == item_id), None)
+                finding = self._lookup(item_id)
                 if finding is None:
                     raise KeyError("Eintrag nicht gefunden")
                 candidate = _poster_candidate(finding, key)
@@ -350,7 +430,7 @@ class Scanner:
                 url = self._resolve_poster(client, settings, finding, candidate)
                 if url:
                     with self._lock:
-                        current = next((item for item in self._state["findings"] if item["item_id"] == item_id), None)
+                        current = self._lookup(item_id)
                         if current is not None:
                             _poster_candidate(current, key)["poster"] = url
                             self._save()
@@ -529,14 +609,14 @@ class Scanner:
         plex_index: PlexIndex | None,
     ) -> tuple[dict | None, str]:
         path = item.get("Path") or ""
-        if not path:
+        if not path or not is_media_item(item):
             return None, "skip"
         kind = "series" if item.get("Type") == "Series" else "movie"
         if kind == "series":
             title, year, embedded = parse_series_path(path)
         else:
             title, year, embedded = parse_movie_path(path)
-        if not title:
+        if not title or (not year and is_collection_name(title)):
             return None, "skip"
         jellyfin_year = _item_year(item)
         jellyfin_ids = item.get("ProviderIds") or {}
@@ -735,7 +815,7 @@ class Scanner:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return
-        self._state["findings"] = data.get("findings") or []
+        self._state["findings"] = [item for item in data.get("findings") or [] if not is_collection_finding(item)]
         self._state["ignored"] = data.get("ignored") or []
         accepted = data.get("accepted") or {}
         self._state["accepted"] = {
@@ -768,6 +848,18 @@ def _client(settings: Settings) -> JellyfinClient:
         settings.jellyfin_password,
         settings.verify_tls,
     )
+
+
+def is_media_item(item: dict) -> bool:
+    return item.get("Type") in {"Movie", "Series"}
+
+
+def is_collection_finding(finding: dict) -> bool:
+    title = finding.get("folder_title") or ""
+    if is_collection_name(title) and not finding.get("folder_year"):
+        return True
+    top = (finding.get("candidates") or [{}])[0] or {}
+    return is_collection_name(top.get("name") or "") and not is_collection_name(title)
 
 
 def _poster_candidate(finding: dict, key: str) -> dict:
@@ -834,6 +926,43 @@ def _poster_finding(
         "episode_issues": [],
         "episode_count": 0,
     }
+
+
+def _manual_finding(client: JellyfinClient, tmdb: TmdbClient | None, item: dict) -> dict | None:
+    path = item.get("Path") or ""
+    kind = "series" if item.get("Type") == "Series" else "movie"
+    if path:
+        title, year, embedded = parse_series_path(path) if kind == "series" else parse_movie_path(path)
+    else:
+        title, year, embedded = "", None, {}
+    jellyfin_name = item.get("Name") or ""
+    finding = _poster_finding(
+        client,
+        tmdb,
+        item_id=item["Id"],
+        kind=kind,
+        path=path,
+        folder_title=title or jellyfin_name,
+        folder_year=year or _item_year(item),
+        jellyfin_name=jellyfin_name,
+        jellyfin_year=_item_year(item),
+        jellyfin_ids=item.get("ProviderIds") or {},
+        jellyfin_original=(item.get("OriginalTitle") or "").strip(),
+        jellyfin_overview=(item.get("Overview") or "").strip()[:400],
+        embedded=embedded,
+    )
+    if finding is None:
+        return None
+    missing = not has_primary_image(item)
+    finding["manual"] = True
+    finding["missing_poster"] = missing
+    finding["status"] = "poster" if missing else "manual"
+    finding["reason"] = (
+        "Kein Plakat in Jellyfin. Wähle unten eins aus."
+        if missing
+        else "Die Angaben passen. Unten kannst du trotzdem ein anderes Plakat wählen."
+    )
+    return finding
 
 
 def _apply_excerpt(finding: dict, payload: dict) -> None:
@@ -949,6 +1078,8 @@ def _search(client: JellyfinClient, tmdb: TmdbClient | None, kind: str, title: s
             found.extend(tmdb.search(kind, title, year))
         except Exception as exc:
             log.warning("TMDB-Suche %s: %s", title, exc)
+    if not is_collection_name(title):
+        found = [candidate for candidate in found if not is_collection_name(candidate.name)]
     merged = merge_candidates(found)
     if tmdb is not None and merged:
         prelim = rank_candidates(title, year, None, merged)

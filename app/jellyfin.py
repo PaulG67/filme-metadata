@@ -350,7 +350,7 @@ class JellyfinClient:
             timeout=180,
         )
 
-    def refresh(self, item_id: str) -> None:
+    def refresh(self, item_id: str, images: bool = True) -> None:
         self._request(
             "POST",
             f"/Items/{item_id}/Refresh",
@@ -359,10 +359,18 @@ class JellyfinClient:
                 "MetadataRefreshMode": "FullRefresh",
                 "ImageRefreshMode": "FullRefresh",
                 "ReplaceAllMetadata": "true",
-                "ReplaceAllImages": "true",
+                "ReplaceAllImages": "true" if images else "false",
             },
             timeout=180,
         )
+
+    def remote_posters(self, item_id: str) -> list[dict]:
+        data = self._get(
+            f"/Items/{item_id}/RemoteImages",
+            {"type": "Primary", "limit": "40", "includeAllLanguages": "false"},
+        )
+        images = data.get("Images") if isinstance(data, dict) else None
+        return [image for image in images or [] if isinstance(image, dict)]
 
     def unlock(self, item_id: str) -> None:
         item = self.item_record(item_id)

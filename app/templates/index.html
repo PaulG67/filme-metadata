@@ -80,6 +80,19 @@
     label.take input { width: 1rem; height: 1rem; margin: 0; accent-color: var(--ok, #22c55e); }
     .posters label.take { margin-top: 4px; font-size: 12px; justify-content: center; width: 100%; }
     tr.skipped td.value.after { opacity: .45; text-decoration: line-through; }
+    .poster-tools { display: flex; flex-direction: column; justify-content: flex-end; gap: 6px; }
+    .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; margin: 0 0 14px; }
+    .gallery.muted { display: block; }
+    .poster-option {
+      display: flex; flex-direction: column; gap: 4px; padding: 4px; border-radius: 10px;
+      background: transparent; border: 2px solid transparent; color: var(--muted); font-size: 11px; font-weight: 400;
+    }
+    .poster-option img { width: 100%; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 7px; background: #0e1320; }
+    .poster-option:hover { border-color: var(--line); }
+    .poster-option.chosen { border-color: var(--ok, #22c55e); color: var(--text, #e5e7eb); }
+    .focus-bar { display: flex; justify-content: space-between; align-items: center; gap: .6rem; margin: 0 0 .6rem; }
+    .focus-bar h2 { margin: 0; }
+    .done { color: #86efac; font-size: .9rem; margin: .3rem 0; }
     @media (max-width: 640px) { .detail-grid { grid-template-columns: 1fr; } .detail-grid img { width: 120px; } }
     input[type="search"] {
       width: 100%;
@@ -181,7 +194,9 @@
     <section id="detail" class="card" hidden></section>
     <details>
       <summary>Kurz erklärt</summary>
-      <p>Die Liste enthält nur Titel, bei denen sich etwas ändern würde. „So lassen“ merkt sich den jetzigen Stand, der erscheint erst wieder, wenn ID oder Jahr sich ändern.</p>
+      <p>Die Liste enthält nur Titel, bei denen sich etwas ändern würde. Sammlungen werden nicht vorgeschlagen. „So lassen“ merkt sich den jetzigen Stand, der erscheint erst wieder, wenn ID oder Jahr sich ändern.</p>
+      <p>Suchst du oben einen Film oder eine Serie und tippst den Treffer an, zeigt die Seite nur diesen Titel, auch wenn alles passt. Dort kannst du ein anderes Plakat wählen. „Zurück zur Liste“ zeigt wieder alle.</p>
+      <p>Bei jeder geänderten Zeile entscheidet das Häkchen, ob der Wert übernommen wird.</p>
       <p>TMDB, IMDb und TVDB sind anklickbar. Dann erscheinen Beschreibung, Besetzung und, wenn ein TMDB-Key gesetzt ist, der Trailer.</p>
       <p>„Ausschnitt erkennen“ zeigt zuerst etwa 20 Sekunden des Films. Danach läuft die Erkennung: Fingerabdruck, sonst der Dialog in diesem Ausschnitt. Dafür brauchst du einen OpenSubtitles-API-Key. Der erste Lauf lädt das Sprachmodell und dauert länger.</p>
     </details>
@@ -194,6 +209,11 @@
     let searchTimer = null;
     const skipped = {};
     let shownFindings = {};
+    const chosenPoster = {};
+    const galleries = {};
+    const openGallery = new Set();
+    const posterVersion = {};
+    let lastStatus = null;
     let picked = null;
     let busy = false;
     let stageClip = null;
@@ -216,6 +236,7 @@
       if (status === "split") return "Abweichung";
       if (status === "no_match") return "Kein Treffer";
       if (status === "poster") return "Plakat";
+      if (status === "manual") return "Gewählt";
       return "Prüfen";
     }
 
@@ -236,6 +257,7 @@
     async function load() {
       const response = await fetch("/api/status");
       const data = await response.json();
+      lastStatus = data;
       renderSummary(data);
       renderPick();
       renderList(data);
@@ -455,11 +477,59 @@
 
     function posterFigures(finding) {
       const proposal = proposalOf(finding);
-      const current = `<figure><img data-poster alt="" src="/api/poster/${encodeURIComponent(finding.item_id)}?side=current"><figcaption>Jetzt in Jellyfin</figcaption></figure>`;
-      const next = proposal
-        ? `<figure><img data-poster alt="" src="/api/poster/${encodeURIComponent(finding.item_id)}?side=proposal&key=${encodeURIComponent(proposal.key || "")}"><figcaption>Nach der Änderung${canPick(finding) ? takeBox(finding, "poster", "Plakat übernehmen") : ""}</figcaption></figure>`
+      const id = finding.item_id;
+      const version = posterVersion[id] ? `&v=${posterVersion[id]}` : "";
+      const current = `<figure><img data-poster alt="" src="/api/poster/${encodeURIComponent(id)}?side=current${version}"><figcaption>Jetzt in Jellyfin</figcaption></figure>`;
+      if (!proposal) return `<div class="posters">${current}</div>`;
+      const chosen = chosenPoster[id];
+      const source = chosen
+        ? chosen.thumb
+        : `/api/poster/${encodeURIComponent(id)}?side=proposal&key=${encodeURIComponent(proposal.key || "")}`;
+      const box = canPick(finding) && changedFields(finding).length ? takeBox(finding, "poster", "Plakat übernehmen") : "";
+      const next = `<figure><img data-poster alt="" referrerpolicy="no-referrer" src="${esc(source)}"><figcaption>${chosen ? "Gewähltes Plakat" : "Neues Plakat"}${box}</figcaption></figure>`;
+      const writable = !finding.jellyfin_accepted || (finding.plex && !finding.plex.accepted);
+      const toggle = writable
+        ? `<div class="poster-tools"><button type="button" class="secondary" data-gallery="${esc(id)}" data-key="${esc(proposal.key || "")}">${openGallery.has(id) ? "Auswahl schließen" : "Anderes Plakat wählen"}</button></div>`
         : "";
-      return `<div class="posters">${current}${next}</div>`;
+      return `<div class="posters">${current}${next}${toggle}</div>${writable ? galleryBlock(finding) : ""}`;
+    }
+
+    function posterNote(option) {
+      const language = { de: "Deutsch", en: "Englisch" }[option.language] || (option.language ? option.language.toUpperCase() : "ohne Text");
+      return `${option.source} · ${language}`;
+    }
+
+    function galleryBlock(finding) {
+      const id = finding.item_id;
+      if (!openGallery.has(id)) return "";
+      const options = galleries[id];
+      if (!options) return `<div class="gallery muted">Lade Plakate…</div>`;
+      if (options.error) return `<div class="gallery muted">${esc(options.error)}</div>`;
+      if (!options.length) return `<div class="gallery muted">Keine weiteren Plakate gefunden.</div>`;
+      const active = chosenPoster[id] ? chosenPoster[id].url : options[0].url;
+      return `<p class="muted idhint">Plakat antippen, um es auszuwählen. Geschrieben wird erst mit dem grünen Button unten.</p>
+        <div class="gallery">${options.map((option, index) => `
+          <button type="button" class="poster-option${option.url === active ? " chosen" : ""}" data-posterpick="${esc(id)}" data-index="${index}">
+            <img loading="lazy" referrerpolicy="no-referrer" alt="" src="${esc(option.thumb)}">
+            <span>${esc(posterNote(option))}</span>
+          </button>`).join("")}</div>`;
+    }
+
+    async function loadGallery(itemId, key) {
+      if (galleries[itemId] && !galleries[itemId].error) return;
+      delete galleries[itemId];
+      try {
+        const response = await fetch(`/api/posters/${encodeURIComponent(itemId)}?key=${encodeURIComponent(key || "")}`);
+        const data = await response.json();
+        galleries[itemId] = response.ok && data.ok !== false ? (data.options || []) : { error: data.error || "Plakate nicht geladen" };
+      } catch {
+        galleries[itemId] = { error: "Plakate nicht geladen" };
+      }
+      rerender();
+    }
+
+    function rerender() {
+      if (lastStatus) renderList(lastStatus);
     }
 
     function compareTable(finding) {
@@ -559,13 +629,16 @@
       `).join("");
       const buttons = [];
       const pickButton = (tone, targets) => `<button type="button" class="${tone}" data-apply="${esc(finding.item_id)}" data-key="${esc(proposal.key)}" data-targets="${targets}" data-pick="1" data-work="${esc(proposalLabel)}">${esc(pickLabel(finding, targets, proposalLabel))}</button>`;
-      if (proposal && !finding.jellyfin_accepted) {
+      const posterOnly = proposal && !changedFields(finding).length;
+      if (posterOnly && !finding.jellyfin_accepted) {
+        buttons.push(`<button type="button" class="ok" data-apply="${esc(finding.item_id)}" data-key="${esc(proposal.key)}" data-targets="jellyfin" data-posteronly="1">${chosenPoster[finding.item_id] ? "Gewähltes Plakat in Jellyfin setzen" : "Neues Plakat in Jellyfin setzen"}</button>`);
+      } else if (proposal && !finding.jellyfin_accepted) {
         buttons.push(pickButton(proposal.auto ? "ok" : "", "jellyfin"));
       }
-      if (proposal && finding.plex && !finding.plex.accepted) {
+      if (proposal && !posterOnly && finding.plex && !finding.plex.accepted) {
         buttons.push(pickButton("secondary", "plex"));
       }
-      if (proposal && finding.plex && !finding.jellyfin_accepted && !finding.plex.accepted) {
+      if (proposal && !posterOnly && finding.plex && !finding.jellyfin_accepted && !finding.plex.accepted) {
         buttons.push(pickButton("ok", "jellyfin,plex"));
       }
       if (finding.plex && !finding.plex.accepted && sidesDiffer(finding)) {
@@ -574,13 +647,16 @@
       if (finding.plex && !finding.jellyfin_accepted && sidesDiffer(finding)) {
         buttons.push(`<button type="button" class="secondary" data-apply="${esc(finding.item_id)}" data-key="side:plex" data-targets="jellyfin">Jellyfin auf den Plex-Stand setzen</button>`);
       }
-      if (!finding.jellyfin_accepted) buttons.push(`<button type="button" class="secondary" data-accept="${esc(finding.item_id)}" data-system="jellyfin">Jellyfin so lassen</button>`);
-      if (finding.plex && !finding.plex.accepted) buttons.push(`<button type="button" class="secondary" data-accept="${esc(finding.item_id)}" data-system="plex">Plex so lassen</button>`);
+      if (!finding.manual && !finding.jellyfin_accepted) buttons.push(`<button type="button" class="secondary" data-accept="${esc(finding.item_id)}" data-system="jellyfin">Jellyfin so lassen</button>`);
+      if (!finding.manual && finding.plex && !finding.plex.accepted) buttons.push(`<button type="button" class="secondary" data-accept="${esc(finding.item_id)}" data-system="plex">Plex so lassen</button>`);
       if (finding.excerpt_clip) {
         buttons.push(`<button type="button" class="secondary" data-showclip="${esc(finding.item_id)}" data-cliptoken="${esc(finding.excerpt_offset || 0)}" data-cliplabel="${esc(finding.excerpt_label || "Filmausschnitt")}">Ausschnitt ansehen</button>`);
       }
       buttons.push(`<button type="button" class="secondary" data-listen="${esc(finding.item_id)}">Ausschnitt erkennen</button>`);
-      buttons.push(`<button type="button" class="secondary" data-ignore="${esc(finding.item_id)}">Ausblenden</button>`);
+      if (!finding.manual) buttons.push(`<button type="button" class="secondary" data-ignore="${esc(finding.item_id)}">Ausblenden</button>`);
+      const done = finding.jellyfin_accepted && (!finding.plex || finding.plex.accepted)
+        ? `<p class="done">Geschrieben. Jellyfin zeigt die Änderung nach wenigen Sekunden.</p>`
+        : "";
       return `
         <article class="card">
           <h3>
@@ -597,13 +673,24 @@
           ${finding.excerpt_transcript ? `<div class="muted">Gehört: „${esc(finding.excerpt_transcript)}“</div>` : ""}
           ${episodeRows(finding)}
           ${others}
-          <p class="muted idhint">Ein Setzen-Button schreibt die genannte Fassung in das genannte System. Vorher bleibt alles unverändert. „So lassen“ schlägt den jetzigen Stand nicht wieder vor.</p>
+          ${done}
+          <p class="muted idhint">${finding.manual ? "Erst der Button schreibt. Vorher bleibt alles unverändert." : "Ein Setzen-Button schreibt die genannte Fassung in das genannte System. Vorher bleibt alles unverändert. „So lassen“ schlägt den jetzigen Stand nicht wieder vor."}</p>
           <div class="row">${buttons.join("")}</div>
         </article>
       `;
     }
 
     function renderList(data) {
+      if (data.focus) {
+        shownFindings = { [data.focus.item_id]: data.focus };
+        list.innerHTML = `
+          <div class="focus-bar">
+            <h2>Gesuchter Titel</h2>
+            <button type="button" class="secondary" data-back="1">← Zurück zur Liste</button>
+          </div>
+          ${changeCard(data.focus)}`;
+        return;
+      }
       const findings = (data.findings || []).filter(hasAdjustment);
       shownFindings = Object.fromEntries(findings.map((item) => [item.item_id, item]));
       if (!findings.length) {
@@ -844,6 +931,11 @@
 
     document.addEventListener("error", (event) => {
       const image = event.target;
+      const option = image && image.closest ? image.closest(".poster-option") : null;
+      if (option && !option.classList.contains("chosen")) {
+        option.remove();
+        return;
+      }
       if (!image || !image.dataset || image.dataset.poster == null) return;
       const missing = document.createElement("div");
       missing.className = "poster-missing";
@@ -890,11 +982,47 @@
         showNotice("Prüfe diesen Titel…", "busy");
         const data = await post("/api/focus", { item_id: button.dataset.choose });
         if (!data) return;
-        picked = data;
+        picked = data.finding ? null : data;
         document.getElementById("query").value = "";
         renderHits([]);
-        showNotice(data.clean ? "Keine Anpassung nötig. Den Ausschnitt kannst du trotzdem lesen." : "Anpassung gefunden.", data.clean ? "" : "ok");
+        if (data.finding) {
+          showNotice(data.clean ? "Die Angaben passen. Du kannst trotzdem ein anderes Plakat wählen." : "Anpassung gefunden.", data.clean ? "" : "ok");
+          const proposal = proposalOf(data.finding);
+          openGallery.add(data.finding.item_id);
+          await load();
+          list.scrollIntoView({ behavior: "smooth", block: "start" });
+          if (proposal) loadGallery(data.finding.item_id, proposal.key);
+        } else {
+          showNotice(data.clean ? "Keine Anpassung nötig." : "Anpassung gefunden.", data.clean ? "" : "ok");
+          await load();
+        }
+        return;
+      }
+      if (button.dataset.back) {
+        await post("/api/focus/clear");
+        showNotice("", "");
         await load();
+        return;
+      }
+      if (button.dataset.gallery) {
+        const itemId = button.dataset.gallery;
+        if (openGallery.has(itemId)) {
+          openGallery.delete(itemId);
+          rerender();
+          return;
+        }
+        openGallery.add(itemId);
+        rerender();
+        loadGallery(itemId, button.dataset.key);
+        return;
+      }
+      if (button.dataset.posterpick) {
+        const itemId = button.dataset.posterpick;
+        const option = (galleries[itemId] || [])[Number(button.dataset.index)];
+        if (!option) return;
+        chosenPoster[itemId] = option;
+        if (skipped[itemId]) skipped[itemId].delete("poster");
+        rerender();
         return;
       }
       if (button.dataset.showclip) {
@@ -916,17 +1044,26 @@
           key: button.dataset.key,
           targets: (button.dataset.targets || "jellyfin").split(",")
         };
-        const finding = shownFindings[button.dataset.apply];
-        const fields = button.dataset.pick && finding ? selectedFields(finding) : null;
+        const itemId = button.dataset.apply;
+        const finding = shownFindings[itemId];
+        let fields = button.dataset.pick && finding ? selectedFields(finding) : null;
+        if (button.dataset.posteronly) fields = ["poster"];
         if (fields && !fields.length) {
           showNotice("Nichts angehakt. Setze ein Häkchen oder nimm „so lassen“.", "");
           return;
         }
         if (fields) request.fields = fields;
+        const usesPoster = !fields || fields.includes("poster");
+        if (chosenPoster[itemId] && usesPoster && (button.dataset.pick || button.dataset.posteronly)) {
+          request.poster = chosenPoster[itemId].url;
+        }
         showNotice("Schreibe Änderung…", "busy");
         const data = await post("/api/apply", request);
         if (data) {
-          delete skipped[button.dataset.apply];
+          delete skipped[itemId];
+          delete chosenPoster[itemId];
+          openGallery.delete(itemId);
+          posterVersion[itemId] = Date.now();
           showNotice("Übernommen: " + data.name, "ok");
         }
       } else if (button.dataset.accept) {

@@ -236,6 +236,15 @@ def is_generic_dir(name: str) -> bool:
     return normalize(name) in GENERIC_DIRS
 
 
+_COLLECTION = re.compile(
+    r"(?i)\b(collection|sammlung|kollektion|box\s*set|boxset|filmreihe|trilogy|trilogie|quadrilogy|anthology|anthologie)\b"
+)
+
+
+def is_collection_name(name: str) -> bool:
+    return bool(_COLLECTION.search(name or ""))
+
+
 def parse_series_path(path: str) -> tuple[str, int | None, dict[str, str]]:
     folder = PurePosixPath((path or "").replace("\\", "/")).name
     return parse_title_and_ids(folder, allow_bare_year=False)
@@ -249,11 +258,14 @@ def parse_movie_path(path: str) -> tuple[str, int | None, dict[str, str]]:
     if pure.parent.name and pure.parent.name not in {"/", "."}:
         parent_title, parent_year, parent_ids = parse_title_and_ids(pure.parent.name, allow_bare_year=False)
     ids = {**parent_ids, **file_ids}
-    if parent_title and not is_generic_dir(parent_title) and parent_year:
+    usable_parent = bool(parent_title) and not is_generic_dir(parent_title)
+    if usable_parent and not parent_year and is_collection_name(parent_title):
+        usable_parent = False
+    if usable_parent and parent_year:
         return parent_title, parent_year, ids
     if file_title and file_year:
         return file_title, file_year, ids
-    if parent_title and not is_generic_dir(parent_title):
+    if usable_parent:
         return parent_title, parent_year, ids
     return file_title, file_year, ids
 

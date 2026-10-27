@@ -136,6 +136,24 @@ class TmdbClient:
         title = chosen.get("title") or chosen.get("name") or ""
         return chosen_kind, str(chosen["id"]), title
 
+    def posters(self, kind: str, tmdb_id: str) -> list[dict]:
+        path = f"/movie/{tmdb_id}/images" if kind == "movie" else f"/tv/{tmdb_id}/images"
+        data = self._get(path, {"include_image_language": "de,en,null"})
+        order = {"de": 0, "en": 1}
+        rows = sorted(
+            (row for row in data.get("posters") or [] if str(row.get("file_path") or "").startswith("/")),
+            key=lambda row: (order.get(row.get("iso_639_1") or "", 2), -float(row.get("vote_average") or 0)),
+        )
+        return [
+            {
+                "url": f"https://image.tmdb.org/t/p/w500{row['file_path']}",
+                "thumb": f"https://image.tmdb.org/t/p/w185{row['file_path']}",
+                "language": row.get("iso_639_1") or "",
+                "source": "TMDB",
+            }
+            for row in rows
+        ]
+
     def describe(self, kind: str, tmdb_id: str) -> dict:
         path = f"/movie/{tmdb_id}" if kind == "movie" else f"/tv/{tmdb_id}"
         data = self._get(path, {"append_to_response": "videos,credits,external_ids", "language": "de-DE"})
