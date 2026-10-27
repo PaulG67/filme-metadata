@@ -22,6 +22,8 @@ from app.identify import (
     parse_title_and_ids,
     is_collection_name,
     is_generic_dir,
+    looks_like_collection,
+    path_looks_like_collection,
     rank_candidates,
     same_work,
     systems_differ,
@@ -280,12 +282,14 @@ class Scanner:
             self._save()
         return {"ok": True}
 
-    def apply_sure(self, selections: dict | None = None) -> dict:
+    def apply_sure(self, selections: dict | None = None, skip_collections: bool = False) -> dict:
         selections = selections or {}
         with self._lock:
             queued = []
             for item in self._state["findings"]:
                 if item["status"] != "sure" or not item.get("candidates") or not item["candidates"][0].get("auto"):
+                    continue
+                if skip_collections and finding_is_collection(item):
                     continue
                 candidate = item["candidates"][0]
                 targets = []
@@ -358,6 +362,46 @@ class Scanner:
                 self._save()
             self._state["focus"] = finding
         return {"ok": True, "clean": clean, "item": summary, "issue": None, "finding": _public_finding(finding)}
+
+    def research(self, item_id: str, term: str, year: int | None) -> dict:
+        with self._lock:
+            finding = self._lookup(item_id)
+            if finding is None:
+                raise KeyError("Eintrag nicht gefunden")
+            kind = finding["kind"]
+            query = term.strip() or finding.get("folder_title") or finding.get("jellyfin_name") or ""
+        if not query:
+            raise RuntimeError("Suchbegriff fehlt")
+        settings = load_settings()
+        client = _client(settings)
+        tmdb = TmdbClient(settings.tmdb_api_key) if settings.tmdb_api_key else None
+        episodes: list[tuple[int, int]] = []
+        if kind == "series":
+            try:
+                episodes, _issues = _episode_facts(client.episodes(item_id))
+            except JellyfinError as exc:
+                log.warning("Folgen für die Suche nicht gelesen: %s", exc)
+        found = _search(client, tmdb, kind, query, year, item_id)
+        ranked = rank_candidates(query, year, episodes or None, found)
+        public = []
+        for candidate in ranked[:8]:
+            entry = _public_candidate(candidate)
+            entry["auto"] = False
+            public.append(entry)
+        with self._lock:
+            current = self._lookup(item_id)
+            if current is None:
+                raise KeyError("Eintrag nicht gefunden")
+            current["candidates"] = public
+            current["searched"] = query + (f" ({year})" if year else "")
+            if public:
+                current["reason"] = f"{len(public)} Treffer für „{current['searched']}“. Die beste Fassung steht im Vergleich, die übrigen darunter."
+            else:
+                current["reason"] = f"Keine Treffer für „{current['searched']}“. Versuche einen anderen Suchbegriff."
+            if current.get("status") == "manual":
+                current["status"] = "review"
+            self._save()
+            return {"ok": True, "count": len(public), "finding": _public_finding(current)}
 
     def clear_focus(self) -> None:
         with self._lock:
@@ -1232,9 +1276,19 @@ def _top_score(finding: dict) -> float:
     return float(candidates[0].get("score") or 0)
 
 
+def finding_is_collection(finding: dict) -> bool:
+    top = (finding.get("candidates") or [{}])[0] or {}
+    return path_looks_like_collection(finding.get("path") or "") or looks_like_collection(
+        finding.get("jellyfin_name") or "",
+        finding.get("folder_title") or "",
+        top.get("name") or "",
+    )
+
+
 def _public_finding(finding: dict) -> dict:
     return {
         **{key: value for key, value in finding.items() if key != "candidates"},
+        "collection": finding_is_collection(finding),
         "candidates": [{key: value for key, value in candidate.items() if key != "raw"} for candidate in finding.get("candidates") or []],
     }
 

@@ -12,7 +12,11 @@ Beispiel: der Ordner heisst `Marvel's Inhumans (2017)`, Jellyfin zeigt **Hotel I
 
 Die App schreibt nichts von selbst. In der Web-UI siehst du den Vorschlag, Pfad und Dateiname, das aktuelle Jellyfin-Plakat und das Plakat der neuen Fassung, und setzt die Fassung mit einem Button in Jellyfin, Plex oder beide. Fehlt nur das Cover, erscheint der Titel unter „Ohne Plakat“. Sammlungen (Ordner wie „James Bond Collection“) werden nicht vorgeschlagen. Tippst du einen Suchtreffer an, zeigt die Seite nur diesen Titel, auch wenn alles passt. Mit „Anderes Plakat wählen“ öffnet sich eine Galerie mit den Plakaten aus Jellyfin und TMDB. Das angetippte Plakat schreibt erst der grüne Button.
 
-Der Reiter „Bibliothek“ zeigt alle Serien und Filme mit Plakat, wie in Jellyfin. Filter: Name, nur ohne Plakat, nur mit Vorschlag. Ein Plakat antippen prüft diesen Titel. Mit den Häkchen wählst du bis zu 50 Titel und prüfst sie mit „Auswahl prüfen“. Funde landen im Reiter „Vorschläge“. Eine Suche ohne Leerzeichen, zum Beispiel `underthedome`, findet „Under the Dome“. TMDB, IMDb und TVDB sind anklickbar: dann erscheinen Beschreibung, Besetzung und, mit TMDB-Key, der Trailer.
+Der Reiter „Bibliothek“ zeigt alle Serien und Filme mit Plakat, wie in Jellyfin. Filter: Name, nur ohne Plakat, nur mit Vorschlag. Ein Plakat antippen prüft diesen Titel. Mit den Häkchen wählst du bis zu 50 Titel und prüfst sie mit „Auswahl prüfen“. Funde landen im Reiter „Vorschläge“.
+
+Auf der Karte eines gewählten Titels sucht „Nach Anpassungen suchen“ mit Titel und Jahr (änderbar) bei Jellyfin und TMDB. Die beste Fassung steht im Vergleich, weitere Treffer darunter mit Plakat und Beschreibung. „Mit Jellyfin vergleichen“ holt einen davon in den Vergleich.
+
+„Collections ausblenden“ (Häkchen neben den Buttons, standardmäßig an) blendet Vorschläge aus, deren Pfad oder Name nach Sammlung aussieht: Collection, Sammlung, Box Set, Saga, Reihe, Trilogie, `[boxset]` oder Bereiche wie `1-3`. Der grüne Sicher-Button schreibt ausgeblendete Collections dann auch nicht. Eine Suche ohne Leerzeichen, zum Beispiel `underthedome`, findet „Under the Dome“. TMDB, IMDb und TVDB sind anklickbar: dann erscheinen Beschreibung, Besetzung und, mit TMDB-Key, der Trailer.
 
 ## So wird identifiziert
 

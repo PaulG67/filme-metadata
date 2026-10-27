@@ -151,6 +151,20 @@ def create_app() -> Flask:
         except (JellyfinError, PlexError, RuntimeError, OSError) as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
 
+    @app.post("/api/focus/search")
+    def focus_search():
+        payload = request.get_json(silent=True) or {}
+        raw_year = str(payload.get("year") or "").strip()
+        year = int(raw_year) if raw_year.isdigit() and 1880 <= int(raw_year) <= 2100 else None
+        try:
+            return jsonify(
+                scanner.research(str(payload.get("item_id") or ""), str(payload.get("term") or "")[:160], year)
+            )
+        except KeyError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 404
+        except (JellyfinError, RuntimeError, OSError) as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
     @app.post("/api/focus/clear")
     def clear_focus():
         scanner.clear_focus()
@@ -206,7 +220,12 @@ def create_app() -> Flask:
             selections = payload.get("selections")
             if not isinstance(selections, dict):
                 selections = {}
-            return jsonify(scanner.apply_sure({str(key): _fields(value) for key, value in selections.items()}))
+            return jsonify(
+                scanner.apply_sure(
+                    {str(key): _fields(value) for key, value in selections.items()},
+                    payload.get("skip_collections") is True,
+                )
+            )
         except (JellyfinError, PlexError, RuntimeError, OSError) as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
 

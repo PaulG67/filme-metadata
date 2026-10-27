@@ -245,6 +245,24 @@ def is_collection_name(name: str) -> bool:
     return bool(_COLLECTION.search(name or ""))
 
 
+_COLLECTION_LOOSE = re.compile(
+    r"(?i)(\b(collections?|sammlung|filmsammlung|kollektion|box\s*set|boxsets?|filmreihe|reihe|saga|"
+    r"trilog(y|ie)|quadrilog(y|ie)|pentalog(y|ie)|duolog(y|ie)|antholog(y|ie)|complete\s+movies)\b"
+    r"|\[boxset\]|(?<![\d])[1-9]\s*-\s*[1-9](?![\d]))"
+)
+
+
+def looks_like_collection(*texts: str) -> bool:
+    return any(_COLLECTION_LOOSE.search(text or "") for text in texts)
+
+
+def path_looks_like_collection(path: str) -> bool:
+    parts = [part for part in (path or "").replace("\\", "/").split("/") if part]
+    if any(part.lower() in {"collections", "boxsets", "sammlungen"} for part in parts):
+        return True
+    return looks_like_collection(*parts)
+
+
 def parse_series_path(path: str) -> tuple[str, int | None, dict[str, str]]:
     folder = PurePosixPath((path or "").replace("\\", "/")).name
     return parse_title_and_ids(folder, allow_bare_year=False)

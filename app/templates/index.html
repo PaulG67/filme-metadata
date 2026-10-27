@@ -185,7 +185,13 @@
     .where .path { margin: .12rem 0; }
     .where .label { display: inline-block; min-width: 4.4rem; font-family: "Segoe UI", system-ui, sans-serif; font-size: .72rem; font-weight: 700; }
     .where .name { color: var(--text); }
-    .candidate { border-top: 1px solid var(--line); padding-top: .7rem; margin-top: .7rem; }
+    .candidate { border-top: 1px solid var(--line); padding-top: .7rem; margin-top: .7rem; display: grid; grid-template-columns: 72px 1fr; gap: .8rem; align-items: start; }
+    .candidate-poster { width: 72px; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 6px; background: #0e1320; border: 1px solid var(--line); }
+    .candidate-text { margin: .3rem 0 .5rem; font-size: .88rem; color: #c6d0df; }
+    .others-head { margin: 1.1rem 0 0; font-size: .95rem; }
+    .research { margin: .9rem 0; padding: .8rem .9rem; border: 1px solid var(--line); border-radius: 10px; background: #141b28; }
+    .research input[type="search"] { flex: 1 1 220px; min-width: 0; margin: 0; }
+    .research .year-input { width: 5.5rem; background: var(--panel); color: var(--text); border: 1px solid var(--line); font-weight: 500; }
     .notes { margin: .35rem 0 .5rem; padding-left: 1.1rem; color: var(--muted); }
     .empty { padding: 1.5rem 1rem; text-align: center; color: var(--muted); border: 1px dashed var(--line); border-radius: 12px; }
     .section-note { margin: 0 0 .7rem; }
@@ -249,6 +255,7 @@
       <button type="button" id="testBtn" class="secondary">Verbindung</button>
       <button type="button" id="scanBtn">Bibliothek prüfen</button>
       <button type="button" class="ok" id="sureBtn">Sichere Vorschläge schreiben</button>
+      <label class="take" title="Titel in Sammlungs-Ordnern oder mit Namen wie Collection, Sammlung, Trilogie oder 1-3 nicht vorschlagen"><input type="checkbox" id="hideCollections" /> Collections ausblenden</label>
     </div>
     <div class="bar" id="bar" hidden><span id="barFill"></span></div>
     <div id="errors" class="errors"></div>
@@ -256,8 +263,8 @@
     <section id="detail" class="card" hidden></section>
     <details>
       <summary>Kurz erklärt</summary>
-      <p>Die Liste enthält nur Titel, bei denen sich etwas ändern würde. Sammlungen werden nicht vorgeschlagen. „So lassen“ merkt sich den jetzigen Stand, der erscheint erst wieder, wenn ID oder Jahr sich ändern.</p>
-      <p>Suchst du oben einen Film oder eine Serie und tippst den Treffer an, zeigt die Seite nur diesen Titel, auch wenn alles passt. Dort kannst du ein anderes Plakat wählen. „Zurück zur Liste“ zeigt wieder alle.</p>
+      <p>Die Liste enthält nur Titel, bei denen sich etwas ändern würde. „Collections ausblenden“ blendet Titel aus Sammlungs-Ordnern oder mit Namen wie Collection, Sammlung, Trilogie oder 1-3 aus. „So lassen“ merkt sich den jetzigen Stand, der erscheint erst wieder, wenn ID oder Jahr sich ändern.</p>
+      <p>Suchst du oben einen Film oder eine Serie und tippst den Treffer an, zeigt die Seite nur diesen Titel, auch wenn alles passt. Dort kannst du ein anderes Plakat wählen oder mit „Nach Anpassungen suchen“ andere Fassungen finden und mit „Mit Jellyfin vergleichen“ gegenüberstellen. „Zurück zur Liste“ zeigt wieder alle.</p>
       <p>Bei jeder geänderten Zeile entscheidet das Häkchen, ob der Wert übernommen wird.</p>
       <p>TMDB, IMDb und TVDB sind anklickbar. Dann erscheinen Beschreibung, Besetzung und, wenn ein TMDB-Key gesetzt ist, der Trailer.</p>
       <p>„Ausschnitt erkennen“ zeigt zuerst etwa 20 Sekunden des Films. Danach läuft die Erkennung: Fingerabdruck, sonst der Dialog in diesem Ausschnitt. Dafür brauchst du einen OpenSubtitles-API-Key. Der erste Lauf lädt das Sprachmodell und dauert länger.</p>
@@ -276,6 +283,8 @@
     const galleries = {};
     const openGallery = new Set();
     const posterVersion = {};
+    const preferredKey = {};
+    const researchInput = {};
     let lastStatus = null;
     let picked = null;
     let busy = false;
@@ -680,16 +689,36 @@
       const jellyLabel = workLabel(finding.jellyfin_name, finding.jellyfin_year);
       const plexLabel = finding.plex ? workLabel(finding.plex.name, finding.plex.year) : "";
       const proposalLabel = proposal ? workLabel(proposal.name, proposal.year) : "";
-      const others = (finding.candidates || []).slice(1).filter((item) => item.key !== "side:jellyfin" && item.key !== "side:plex").map((item) => `
+      const focused = Boolean(lastStatus && lastStatus.focus && lastStatus.focus.item_id === finding.item_id);
+      const otherList = (finding.candidates || []).slice(1).filter((item) => item.key !== "side:jellyfin" && item.key !== "side:plex");
+      const others = (otherList.length ? `<h4 class="others-head">Weitere Treffer</h4>` : "") + otherList.map((item) => `
         <div class="candidate">
+          ${item.poster ? `<img class="candidate-poster" loading="lazy" referrerpolicy="no-referrer" alt="" src="${esc(item.poster)}">` : `<div class="candidate-poster empty-poster"></div>`}
+          <div class="candidate-body">
           <strong>${esc(item.name)}${esc(yearOf(item.year))}</strong>
+          ${item.original_name && item.original_name !== item.name ? `<div class="muted">Original: ${esc(item.original_name)}</div>` : ""}
           <div class="muted">${esc(ids(item.provider_ids))}</div>
+          ${item.overview ? `<p class="candidate-text">${esc(item.overview.slice(0, 220))}${item.overview.length > 220 ? "…" : ""}</p>` : ""}
           <div class="row">
+            <button type="button" data-compare="${esc(finding.item_id)}" data-key="${esc(item.key)}">Mit Jellyfin vergleichen</button>
             <button type="button" class="secondary" data-apply="${esc(finding.item_id)}" data-key="${esc(item.key)}" data-targets="jellyfin">${esc(setButton("jellyfin", workLabel(item.name, item.year)))}</button>
             ${finding.plex && !finding.plex.accepted ? `<button type="button" class="secondary" data-apply="${esc(finding.item_id)}" data-key="${esc(item.key)}" data-targets="plex">${esc(setButton("plex", workLabel(item.name, item.year)))}</button>` : ""}
           </div>
+          </div>
         </div>
       `).join("");
+      const typed = researchInput[finding.item_id] || {};
+      const research = focused ? `
+        <div class="research">
+          <strong>Nach Anpassungen suchen</strong>
+          <p class="muted idhint">Sucht bei Jellyfin und TMDB nach passenden Fassungen. Stimmt der Titel nicht, ändere den Suchbegriff.</p>
+          <div class="row">
+            <input type="search" data-research-term="${esc(finding.item_id)}" value="${esc(typed.term ?? (finding.folder_title || finding.jellyfin_name || ""))}" placeholder="Titel" />
+            <input type="text" inputmode="numeric" maxlength="4" class="year-input" data-research-year="${esc(finding.item_id)}" value="${esc(typed.year ?? (finding.folder_year || finding.jellyfin_year || ""))}" placeholder="Jahr" />
+            <button type="button" class="ok" data-research="${esc(finding.item_id)}">Suchen</button>
+          </div>
+          ${finding.searched ? `<p class="muted idhint">Zuletzt gesucht: ${esc(finding.searched)}</p>` : ""}
+        </div>` : "";
       const buttons = [];
       const pickButton = (tone, targets) => `<button type="button" class="${tone}" data-apply="${esc(finding.item_id)}" data-key="${esc(proposal.key)}" data-targets="${targets}" data-pick="1" data-work="${esc(proposalLabel)}">${esc(pickLabel(finding, targets, proposalLabel))}</button>`;
       const posterOnly = proposal && !changedFields(finding).length;
@@ -725,6 +754,7 @@
           <h3>
             <span class="badge kind">${kindLabel(finding.kind)}</span>
             <span class="badge ${esc(finding.status)}">${statusLabel(finding.status)}</span>
+            ${finding.collection ? `<span class="badge kind">Collection</span>` : ""}
             <span class="before">${esc(jellyLabel)}</span>
             ${plexLabel ? `<span class="arrow">·</span><span class="plex">${esc(plexLabel)}</span>` : ""}
             ${proposalLabel && proposalLabel !== jellyLabel ? `<span class="arrow">→</span><span class="after">${esc(proposalLabel)}</span>` : ""}
@@ -735,6 +765,7 @@
           ${compareTable(finding)}
           ${finding.excerpt_transcript ? `<div class="muted">Gehört: „${esc(finding.excerpt_transcript)}“</div>` : ""}
           ${episodeRows(finding)}
+          ${research}
           ${others}
           ${done}
           <p class="muted idhint">${finding.manual ? "Erst der Button schreibt. Vorher bleibt alles unverändert." : "Ein Setzen-Button schreibt die genannte Fassung in das genannte System. Vorher bleibt alles unverändert. „So lassen“ schlägt den jetzigen Stand nicht wieder vor."}</p>
@@ -743,8 +774,23 @@
       `;
     }
 
+    function hidingCollections() {
+      return document.getElementById("hideCollections").checked;
+    }
+
+    function preferCandidate(finding) {
+      const key = preferredKey[finding.item_id];
+      const candidates = finding.candidates || [];
+      const index = key ? candidates.findIndex((item) => item.key === key) : -1;
+      if (index > 0) finding.candidates = [candidates[index], ...candidates.slice(0, index), ...candidates.slice(index + 1)];
+    }
+
     function renderList(data) {
-      const openCount = (data.findings || []).filter(hasAdjustment).length;
+      (data.findings || []).forEach(preferCandidate);
+      if (data.focus) preferCandidate(data.focus);
+      const adjustable = (data.findings || []).filter(hasAdjustment);
+      const hiddenCollections = hidingCollections() ? adjustable.filter((item) => item.collection).length : 0;
+      const openCount = adjustable.length - hiddenCollections;
       document.getElementById("tabCount").textContent = openCount ? `(${openCount})` : "";
       if (data.focus) {
         shownFindings = { [data.focus.item_id]: data.focus };
@@ -756,10 +802,13 @@
           ${changeCard(data.focus)}`;
         return;
       }
-      const findings = (data.findings || []).filter(hasAdjustment);
+      const findings = adjustable.filter((item) => !(hiddenCollections && item.collection));
       shownFindings = Object.fromEntries(findings.map((item) => [item.item_id, item]));
+      const hiddenNote = hiddenCollections
+        ? `<p class="muted idhint">${hiddenCollections} ${hiddenCollections === 1 ? "Collection ist" : "Collections sind"} ausgeblendet. Häkchen „Collections ausblenden“ oben entfernen, um sie zu sehen.</p>`
+        : "";
       if (!findings.length) {
-        list.innerHTML = `<div class="empty">${data.running ? "Prüfung läuft." : "Keine Anpassung offen. Oben kannst du trotzdem einen Titel aus der Bibliothek wählen."}</div>`;
+        list.innerHTML = `<div class="empty">${data.running ? "Prüfung läuft." : "Keine Anpassung offen. Oben kannst du trotzdem einen Titel aus der Bibliothek wählen."}</div>${hiddenNote}`;
         return;
       }
       const groups = [
@@ -768,7 +817,7 @@
         ["Plex weicht ab", findings.filter((item) => item.status === "split" && !item.missing_poster), "Wähle, welches System die Angaben übernimmt."],
         ["Prüfen", findings.filter((item) => item.status !== "sure" && item.status !== "split" && !item.missing_poster), "Noch nicht eindeutig. Nichts wird automatisch geschrieben."]
       ];
-      list.innerHTML = groups.filter((group) => group[1].length).map(([title, items, note]) => `
+      list.innerHTML = hiddenNote + groups.filter((group) => group[1].length).map(([title, items, note]) => `
         <h2>${esc(title)}</h2>
         <p class="section-note muted">${esc(note)}</p>
         ${items.map(changeCard).join("")}
@@ -900,7 +949,7 @@
         const fields = finding.status === "sure" ? selectedFields(finding) : null;
         if (fields) selections[finding.item_id] = fields;
       });
-      const data = await post("/api/apply-sure", { selections });
+      const data = await post("/api/apply-sure", { selections, skip_collections: hidingCollections() });
       if (data) showNotice(data.applied && data.applied.length ? ("Übernommen: " + data.applied.join(", ")) : "Nichts Sicheres offen", data.applied && data.applied.length ? "ok" : "");
       load();
     };
@@ -993,6 +1042,59 @@
         box.innerHTML = `<h2>${esc(name)}${esc(year)}</h2><p>Angaben nicht geladen.</p><button type="button" class="secondary" id="clearDetail">Schließen</button>`;
       }
     }
+
+    async function runResearch(itemId, button) {
+      const term = document.querySelector(`[data-research-term="${CSS.escape(itemId)}"]`);
+      const year = document.querySelector(`[data-research-year="${CSS.escape(itemId)}"]`);
+      if (button) {
+        button.disabled = true;
+        button.textContent = "Suche…";
+      }
+      showNotice("Suche nach passenden Fassungen…", "busy");
+      const data = await post("/api/focus/search", {
+        item_id: itemId,
+        term: term ? term.value.trim() : "",
+        year: year ? year.value.trim() : ""
+      });
+      if (button) {
+        button.disabled = false;
+        button.textContent = "Suchen";
+      }
+      if (!data) return;
+      delete preferredKey[itemId];
+      delete chosenPoster[itemId];
+      delete galleries[itemId];
+      delete skipped[itemId];
+      showNotice(data.count ? `${data.count} Treffer gefunden.` : "Keine Treffer. Versuche einen anderen Suchbegriff.", data.count ? "ok" : "");
+      await load();
+      const proposal = proposalOf(data.finding);
+      if (proposal && openGallery.has(itemId)) loadGallery(itemId, proposal.key);
+    }
+
+    document.body.addEventListener("input", (event) => {
+      const field = event.target;
+      if (!field.dataset) return;
+      const itemId = field.dataset.researchTerm || field.dataset.researchYear;
+      if (!itemId) return;
+      researchInput[itemId] = researchInput[itemId] || {};
+      researchInput[itemId][field.dataset.researchTerm ? "term" : "year"] = field.value;
+    });
+
+    document.body.addEventListener("keydown", (event) => {
+      const field = event.target;
+      if (event.key !== "Enter" || !field.dataset) return;
+      const itemId = field.dataset.researchTerm || field.dataset.researchYear;
+      if (!itemId) return;
+      event.preventDefault();
+      runResearch(itemId, document.querySelector(`[data-research="${CSS.escape(itemId)}"]`));
+    });
+
+    const hideBox = document.getElementById("hideCollections");
+    hideBox.checked = localStorage.getItem("hideCollections") !== "0";
+    hideBox.onchange = () => {
+      localStorage.setItem("hideCollections", hideBox.checked ? "1" : "0");
+      rerender();
+    };
 
     async function focusTitle(itemId) {
       showNotice("Prüfe diesen Titel…", "busy");
@@ -1234,6 +1336,22 @@
         library.selected.clear();
         document.querySelectorAll("[data-libkind]").forEach((item) => item.classList.toggle("active", item === button));
         await loadLibrary(true);
+        return;
+      }
+      if (button.dataset.research) {
+        await runResearch(button.dataset.research, button);
+        return;
+      }
+      if (button.dataset.compare) {
+        const itemId = button.dataset.compare;
+        preferredKey[itemId] = button.dataset.key;
+        delete chosenPoster[itemId];
+        delete galleries[itemId];
+        delete skipped[itemId];
+        rerender();
+        const card = document.querySelector(`[data-research="${CSS.escape(itemId)}"]`) || list;
+        card.closest("article")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        if (openGallery.has(itemId)) loadGallery(itemId, button.dataset.key);
         return;
       }
       if (button.dataset.back) {

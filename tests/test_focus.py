@@ -151,6 +151,39 @@ def test_checking_a_selection_adds_its_findings(monkeypatch, tmp_path):
         raise AssertionError("more than 50 titles were accepted")
 
 
+class SearchingClient(FakeClient):
+    def remote_search(self, kind, title, year, item_id):
+        return [
+            {"Name": "Scandal", "ProductionYear": 2012, "ProviderIds": {"Tmdb": "39269"}},
+            {"Name": "Scandal", "ProductionYear": 1989, "ProviderIds": {"Tmdb": "1111"}},
+        ]
+
+
+def test_search_button_fills_the_focus_with_candidates(monkeypatch, tmp_path):
+    fake = SearchingClient(has_image=True)
+    scanner = _scanner(monkeypatch, tmp_path, fake)
+    scanner.focus("scandal")
+    result = scanner.research("scandal", "Scandal", 2012)
+    assert result["count"] == 2
+    finding = result["finding"]
+    assert finding["candidates"][0]["year"] == 2012
+    assert finding["status"] == "review"
+    assert "Scandal (2012)" in finding["reason"]
+    assert scanner.status()["focus"]["candidates"][1]["year"] == 1989
+
+
+def test_collections_are_flagged_for_hiding():
+    from app.identify import path_looks_like_collection
+    from app.scanner import finding_is_collection
+
+    assert path_looks_like_collection("/filme/Harry Potter Collection/Harry Potter 1 (2001)/hp.mkv")
+    assert path_looks_like_collection("/config/data/collections/Alien [boxset]")
+    assert path_looks_like_collection("/filme/Der Pate 1-3/Der Pate (1972).mkv")
+    assert not path_looks_like_collection("/serien/Scandal (2012)")
+    assert finding_is_collection({"path": "/filme/x/x.mkv", "jellyfin_name": "Matrix Trilogie", "candidates": []})
+    assert not finding_is_collection({"path": "/filme/Dune (2021)/Dune.mkv", "jellyfin_name": "Dune", "candidates": []})
+
+
 def test_unsafe_poster_is_refused(monkeypatch, tmp_path):
     fake = FakeClient(has_image=False)
     scanner = _scanner(monkeypatch, tmp_path, fake)
