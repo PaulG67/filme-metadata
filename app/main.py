@@ -73,8 +73,10 @@ def create_app() -> Flask:
             return Response(status=404)
         side = str(request.args.get("side") or "current")
         key = str(request.args.get("key") or "")
+        raw_width = str(request.args.get("w") or "")
+        width = min(480, max(120, int(raw_width))) if raw_width.isdigit() else 480
         try:
-            data, mime = scanner.poster(item_id, side, key)
+            data, mime = scanner.poster(item_id, side, key, width)
         except KeyError:
             return Response(status=404)
         except (JellyfinError, OSError, RuntimeError, ValueError, httpx.HTTPError) as exc:
@@ -117,6 +119,36 @@ def create_app() -> Flask:
         try:
             return jsonify(scanner.focus(item_id))
         except (JellyfinError, RuntimeError, OSError) as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+    @app.get("/api/browse")
+    def browse():
+        args = request.args
+        start = str(args.get("start") or "0")
+        limit = str(args.get("limit") or "60")
+        try:
+            return jsonify(
+                scanner.browse(
+                    "movie" if args.get("kind") == "movie" else "series",
+                    str(args.get("q") or "")[:120],
+                    args.get("missing") == "1",
+                    args.get("open") == "1",
+                    int(start) if start.isdigit() else 0,
+                    int(limit) if limit.isdigit() else 60,
+                    args.get("refresh") == "1",
+                )
+            )
+        except (JellyfinError, OSError, RuntimeError, httpx.HTTPError) as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+    @app.post("/api/check")
+    def check():
+        payload = request.get_json(silent=True) or {}
+        raw = payload.get("item_ids")
+        item_ids = [str(value) for value in raw if str(value)] if isinstance(raw, list) else []
+        try:
+            return jsonify(scanner.check_items(item_ids))
+        except (JellyfinError, PlexError, RuntimeError, OSError) as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
 
     @app.post("/api/focus/clear")

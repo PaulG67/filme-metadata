@@ -117,6 +117,40 @@ def test_full_write_keeps_the_chosen_poster(monkeypatch, tmp_path):
     )
 
 
+class LibraryClient(FakeClient):
+    def list_media(self):
+        return [
+            {"Id": "a", "Type": "Series", "Name": "Scandal", "ProductionYear": 2012, "ImageTags": {"Primary": "x"}},
+            {"Id": "b", "Type": "Series", "Name": "Under the Dome", "ProductionYear": 2013, "ImageTags": {}},
+            {"Id": "c", "Type": "Movie", "Name": "Dune", "ProductionYear": 2021, "ImageTags": {"Primary": "y"}},
+            {"Id": "d", "Type": "BoxSet", "Name": "Dune Collection", "ImageTags": {}},
+        ]
+
+
+def test_library_overview_filters_kind_poster_and_name(monkeypatch, tmp_path):
+    scanner = _scanner(monkeypatch, tmp_path, LibraryClient())
+    series = scanner.browse("series")
+    assert [item["name"] for item in series["items"]] == ["Scandal", "Under the Dome"]
+    assert scanner.browse("series", missing_only=True)["items"][0]["id"] == "b"
+    assert scanner.browse("series", term="underthedome")["total"] == 1
+    movies = scanner.browse("movie")
+    assert [item["id"] for item in movies["items"]] == ["c"]
+
+
+def test_checking_a_selection_adds_its_findings(monkeypatch, tmp_path):
+    fake = FakeClient(has_image=False)
+    scanner = _scanner(monkeypatch, tmp_path, fake)
+    result = scanner.check_items(["scandal"])
+    assert result["found"] == ["Scandal"]
+    assert scanner.status()["findings"][0]["missing_poster"] is True
+    try:
+        scanner.check_items([str(index) for index in range(51)])
+    except RuntimeError as exc:
+        assert "50" in str(exc)
+    else:
+        raise AssertionError("more than 50 titles were accepted")
+
+
 def test_unsafe_poster_is_refused(monkeypatch, tmp_path):
     fake = FakeClient(has_image=False)
     scanner = _scanner(monkeypatch, tmp_path, fake)

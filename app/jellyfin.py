@@ -166,6 +166,8 @@ class JellyfinClient:
                     "Recursive": "true",
                     "IncludeItemTypes": "Series,Movie",
                     "Fields": "ProviderIds,Path,ProductionYear,OriginalTitle,PremiereDate,Overview,ImageTags",
+                    "SortBy": "SortName",
+                    "SortOrder": "Ascending",
                     "StartIndex": str(start),
                     "Limit": "200",
                 },
@@ -236,11 +238,11 @@ class JellyfinClient:
             "MediaSources,RunTimeTicks,Path,ProviderIds,IndexNumber,ParentIndexNumber,ProductionYear,Overview,OriginalTitle,SeriesName,SeriesId,PremiereDate,ImageTags",
         )
 
-    def primary_image(self, item_id: str) -> tuple[bytes, str] | None:
+    def primary_image(self, item_id: str, width: int = 480) -> tuple[bytes, str] | None:
         response = self.http.get(
             f"{self.baseurl}/Items/{item_id}/Images/Primary",
             headers=self.headers,
-            params={"maxWidth": "480", "quality": "90"},
+            params={"maxWidth": str(width), "quality": "90"},
         )
         if response.status_code == 404:
             return None

@@ -93,6 +93,41 @@
     .focus-bar { display: flex; justify-content: space-between; align-items: center; gap: .6rem; margin: 0 0 .6rem; }
     .focus-bar h2 { margin: 0; }
     .done { color: #86efac; font-size: .9rem; margin: .3rem 0; }
+    .tabs { display: flex; gap: .3rem; margin: 1rem 0 .9rem; border-bottom: 1px solid var(--line); }
+    .tabs button {
+      background: transparent; color: var(--muted); border-radius: 8px 8px 0 0;
+      border-bottom: 3px solid transparent; padding: .6rem 1rem;
+    }
+    .tabs button.active { color: var(--text); border-bottom-color: var(--accent); }
+    .tabs .count { color: var(--muted); font-weight: 400; }
+    .lib-tools, .lib-actions { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; margin: 0 0 .7rem; }
+    .lib-tools input[type="search"] { flex: 1 1 220px; min-width: 0; margin: 0; }
+    .lib-actions .spacer { flex: 1; }
+    .seg { display: inline-flex; background: #2a3548; border-radius: 9px; padding: 3px; }
+    .seg button { background: transparent; color: var(--muted); padding: .4rem .8rem; }
+    .seg button.active { background: var(--accent); color: #0c1220; }
+    .lib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 14px; }
+    .tile { position: relative; }
+    .tile-open { display: block; width: 100%; padding: 0; background: transparent; border-radius: 10px; }
+    .tile-open img, .tile-open .poster-missing {
+      width: 100%; height: auto; aspect-ratio: 2 / 3; object-fit: cover; display: block;
+      border-radius: 10px; background: #0e1320; border: 1px solid var(--line);
+    }
+    .tile-open .poster-missing { display: grid; place-items: center; color: var(--muted); font-size: .8rem; font-weight: 400; }
+    .tile-open:hover img, .tile-open:focus-visible img { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .tile.selected .tile-open img, .tile.selected .tile-open .poster-missing { outline: 3px solid var(--ok); outline-offset: 2px; }
+    .tile-pick {
+      position: absolute; top: 6px; left: 6px; background: rgba(12, 18, 32, .82);
+      border-radius: 7px; padding: 5px; display: flex; cursor: pointer;
+    }
+    .tile-pick input { width: 1.05rem; height: 1.05rem; margin: 0; accent-color: var(--ok); }
+    .tile-name { margin-top: 6px; font-weight: 650; font-size: .9rem; line-height: 1.25; overflow-wrap: anywhere; }
+    .tile-meta { color: var(--muted); font-size: .78rem; display: flex; flex-wrap: wrap; gap: .3rem; align-items: center; }
+    .tile-flag { border-radius: 999px; padding: 0 .4rem; font-size: .7rem; background: #2a3548; color: var(--text); }
+    .tile-flag.warn { background: color-mix(in srgb, var(--warn) 25%, transparent); color: #fde68a; }
+    .tile-flag.open { background: color-mix(in srgb, var(--accent) 25%, transparent); color: #c7d7ff; }
+    .lib-more { justify-content: center; margin-top: 1rem; }
+    .lib-grid .empty { grid-column: 1 / -1; }
     @media (max-width: 640px) { .detail-grid { grid-template-columns: 1fr; } .detail-grid img { width: 120px; } }
     input[type="search"] {
       width: 100%;
@@ -174,6 +209,34 @@
 <body>
   <main>
     <h1><img src="/icon.svg" alt="" />filme-metadata</h1>
+    <nav class="tabs" role="tablist">
+      <button type="button" role="tab" data-tab="list" class="active">Vorschläge <span class="count" id="tabCount"></span></button>
+      <button type="button" role="tab" data-tab="library">Bibliothek</button>
+    </nav>
+    <div id="notice" class="notice" hidden></div>
+    <section id="tabLibrary" hidden>
+      <p class="sub">Alle Serien und Filme aus Jellyfin. Plakat antippen prüft diesen Titel. Mit dem Häkchen oben links wählst du mehrere für eine gemeinsame Prüfung.</p>
+      <div class="lib-tools">
+        <div class="seg">
+          <button type="button" data-libkind="series" class="active">Serien</button>
+          <button type="button" data-libkind="movie">Filme</button>
+        </div>
+        <input id="libFilter" type="search" placeholder="In der Bibliothek filtern" autocomplete="off" />
+        <label class="take"><input type="checkbox" id="libMissing" /> nur ohne Plakat</label>
+        <label class="take"><input type="checkbox" id="libOpen" /> nur mit Vorschlag</label>
+        <button type="button" class="secondary" id="libReload">Neu laden</button>
+      </div>
+      <div class="lib-actions">
+        <span class="muted" id="libCount"></span>
+        <span class="spacer"></span>
+        <button type="button" class="secondary" id="libAll">Alle sichtbaren wählen</button>
+        <button type="button" class="secondary" id="libNone" hidden>Auswahl leeren</button>
+        <button type="button" class="ok" id="libCheck" disabled>Auswahl prüfen</button>
+      </div>
+      <div id="libGrid" class="lib-grid"></div>
+      <div class="row lib-more"><button type="button" class="secondary" id="libMore" hidden>Mehr anzeigen</button></div>
+    </section>
+    <div id="tabList">
     <p class="sub">Die Liste zeigt nur Titel, bei denen sich etwas ändern würde. Oben kannst du trotzdem einen bestimmten Film, eine Serie oder eine Folge wählen.</p>
     <form class="search" id="searchForm">
       <label class="muted" for="query">Titel aus der Bibliothek</label>
@@ -188,7 +251,6 @@
       <button type="button" class="ok" id="sureBtn">Sichere Vorschläge schreiben</button>
     </div>
     <div class="bar" id="bar" hidden><span id="barFill"></span></div>
-    <div id="notice" class="notice" hidden></div>
     <div id="errors" class="errors"></div>
     <section id="stage" class="card" hidden></section>
     <section id="detail" class="card" hidden></section>
@@ -201,6 +263,7 @@
       <p>„Ausschnitt erkennen“ zeigt zuerst etwa 20 Sekunden des Films. Danach läuft die Erkennung: Fingerabdruck, sonst der Dialog in diesem Ausschnitt. Dafür brauchst du einen OpenSubtitles-API-Key. Der erste Lauf lädt das Sprachmodell und dauert länger.</p>
     </details>
     <div id="list"></div>
+    </div>
   </main>
   <script>
     const list = document.getElementById("list");
@@ -681,6 +744,8 @@
     }
 
     function renderList(data) {
+      const openCount = (data.findings || []).filter(hasAdjustment).length;
+      document.getElementById("tabCount").textContent = openCount ? `(${openCount})` : "";
       if (data.focus) {
         shownFindings = { [data.focus.item_id]: data.focus };
         list.innerHTML = `
@@ -929,6 +994,167 @@
       }
     }
 
+    async function focusTitle(itemId) {
+      showNotice("Prüfe diesen Titel…", "busy");
+      const data = await post("/api/focus", { item_id: itemId });
+      if (!data) return;
+      picked = data.finding ? null : data;
+      document.getElementById("query").value = "";
+      renderHits([]);
+      if (data.finding) {
+        showNotice(data.clean ? "Die Angaben passen. Du kannst trotzdem ein anderes Plakat wählen." : "Anpassung gefunden.", data.clean ? "" : "ok");
+        const proposal = proposalOf(data.finding);
+        openGallery.add(data.finding.item_id);
+        await load();
+        list.scrollIntoView({ behavior: "smooth", block: "start" });
+        if (proposal) loadGallery(data.finding.item_id, proposal.key);
+      } else {
+        showNotice(data.clean ? "Keine Anpassung nötig." : "Anpassung gefunden.", data.clean ? "" : "ok");
+        await load();
+      }
+    }
+
+    const library = { kind: "series", items: [], total: 0, selected: new Set(), loaded: false, request: 0 };
+    let activeTab = "list";
+    let returnTab = "list";
+    let libraryTimer = null;
+
+    function showTab(tab) {
+      activeTab = tab;
+      document.getElementById("tabList").hidden = tab !== "list";
+      document.getElementById("tabLibrary").hidden = tab !== "library";
+      document.querySelectorAll("[data-tab]").forEach((button) => {
+        const active = button.dataset.tab === tab;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-selected", active ? "true" : "false");
+      });
+      if (tab === "library" && !library.loaded) loadLibrary(true);
+    }
+
+    async function loadLibrary(reset, refresh) {
+      const grid = document.getElementById("libGrid");
+      const request = ++library.request;
+      if (reset) {
+        library.items = [];
+        library.total = 0;
+        grid.innerHTML = `<div class="empty">Lade Bibliothek…</div>`;
+      }
+      const params = new URLSearchParams({
+        kind: library.kind,
+        q: document.getElementById("libFilter").value.trim(),
+        missing: document.getElementById("libMissing").checked ? "1" : "0",
+        open: document.getElementById("libOpen").checked ? "1" : "0",
+        start: String(library.items.length),
+        limit: "60",
+        refresh: refresh ? "1" : "0"
+      });
+      try {
+        const response = await fetch("/api/browse?" + params.toString());
+        const data = await response.json();
+        if (request !== library.request) return;
+        if (!response.ok || data.ok === false) {
+          grid.innerHTML = `<div class="empty">${esc(data.error || "Bibliothek nicht geladen")}</div>`;
+          return;
+        }
+        library.loaded = true;
+        library.total = data.total || 0;
+        library.items = library.items.concat(data.items || []);
+        renderLibrary();
+      } catch {
+        if (request === library.request) grid.innerHTML = `<div class="empty">Bibliothek nicht geladen. Läuft Jellyfin?</div>`;
+      }
+    }
+
+    function tileHtml(item) {
+      const selected = library.selected.has(item.id);
+      const image = item.has_poster
+        ? `<img data-poster loading="lazy" alt="" src="/api/poster/${encodeURIComponent(item.id)}?side=current&w=240${posterVersion[item.id] ? `&v=${posterVersion[item.id]}` : ""}">`
+        : `<div class="poster-missing">Kein Plakat</div>`;
+      const flags = [
+        item.year ? `<span>${esc(item.year)}</span>` : "",
+        item.has_poster ? "" : `<span class="tile-flag warn">kein Plakat</span>`,
+        item.open ? `<span class="tile-flag open">Vorschlag</span>` : "",
+        item.ignored ? `<span class="tile-flag">ausgeblendet</span>` : ""
+      ].join("");
+      return `
+        <div class="tile${selected ? " selected" : ""}" data-tile="${esc(item.id)}">
+          <button type="button" class="tile-open" data-libopen="${esc(item.id)}" title="${esc(item.name)} prüfen">${image}</button>
+          <label class="tile-pick" title="Für die gemeinsame Prüfung wählen"><input type="checkbox" data-libpick="${esc(item.id)}"${selected ? " checked" : ""}></label>
+          <div class="tile-name">${esc(item.name)}</div>
+          <div class="tile-meta">${flags}</div>
+        </div>`;
+    }
+
+    function renderLibrary() {
+      const grid = document.getElementById("libGrid");
+      const word = library.kind === "movie" ? (library.total === 1 ? "Film" : "Filme") : (library.total === 1 ? "Serie" : "Serien");
+      grid.innerHTML = library.items.length
+        ? library.items.map(tileHtml).join("")
+        : `<div class="empty">Nichts gefunden. Filter anpassen oder „Neu laden“.</div>`;
+      document.getElementById("libCount").textContent = `${library.total} ${word}`;
+      document.getElementById("libMore").hidden = library.items.length >= library.total;
+      document.getElementById("libMore").textContent = `Mehr anzeigen (${library.total - library.items.length} weitere)`;
+      updateSelection();
+    }
+
+    function updateSelection() {
+      const count = library.selected.size;
+      const check = document.getElementById("libCheck");
+      check.disabled = count === 0;
+      check.textContent = count ? `Auswahl prüfen (${count})` : "Auswahl prüfen";
+      document.getElementById("libNone").hidden = count === 0;
+    }
+
+    function scheduleLibrary() {
+      clearTimeout(libraryTimer);
+      libraryTimer = setTimeout(() => loadLibrary(true), 250);
+    }
+
+    document.getElementById("libFilter").oninput = scheduleLibrary;
+    document.getElementById("libMissing").onchange = () => loadLibrary(true);
+    document.getElementById("libOpen").onchange = () => loadLibrary(true);
+    document.getElementById("libReload").onclick = () => loadLibrary(true, true);
+    document.getElementById("libMore").onclick = () => loadLibrary(false);
+    document.getElementById("libAll").onclick = () => {
+      library.items.slice(0, 50).forEach((item) => library.selected.add(item.id));
+      renderLibrary();
+      if (library.items.length > 50) showNotice("Höchstens 50 Titel auf einmal. Die ersten 50 sind gewählt.", "");
+    };
+    document.getElementById("libNone").onclick = () => {
+      library.selected.clear();
+      renderLibrary();
+    };
+    document.getElementById("libCheck").onclick = async () => {
+      const ids = [...library.selected];
+      if (!ids.length || busy) return;
+      if (ids.length > 50) {
+        showNotice("Höchstens 50 Titel auf einmal prüfen.", "bad");
+        return;
+      }
+      busy = true;
+      const button = document.getElementById("libCheck");
+      button.disabled = true;
+      button.textContent = "Prüfe…";
+      showNotice(`Prüfe ${ids.length} ${ids.length === 1 ? "Titel" : "Titel"}. Das dauert je Titel einige Sekunden…`, "busy");
+      try {
+        const data = await post("/api/check", { item_ids: ids });
+        if (!data) return;
+        library.selected.clear();
+        const found = data.found || [];
+        const clean = data.clean || [];
+        const parts = [];
+        if (found.length) parts.push(`${found.length} mit Vorschlag`);
+        if (clean.length) parts.push(`${clean.length} passen`);
+        if ((data.errors || []).length) parts.push(`${data.errors.length} nicht lesbar`);
+        showNotice(`Geprüft: ${parts.join(", ") || "nichts"}.${found.length ? " Die Vorschläge stehen im Reiter „Vorschläge“." : ""}`, found.length ? "ok" : "");
+        await load();
+        await loadLibrary(true);
+      } finally {
+        busy = false;
+        updateSelection();
+      }
+    };
+
     document.addEventListener("error", (event) => {
       const image = event.target;
       const option = image && image.closest ? image.closest(".poster-option") : null;
@@ -945,6 +1171,15 @@
 
     document.body.addEventListener("change", (event) => {
       const box = event.target;
+      if (box.dataset && box.dataset.libpick) {
+        const itemId = box.dataset.libpick;
+        if (box.checked) library.selected.add(itemId);
+        else library.selected.delete(itemId);
+        const tile = box.closest(".tile");
+        if (tile) tile.classList.toggle("selected", box.checked);
+        updateSelection();
+        return;
+      }
       if (!box.dataset || !box.dataset.take) return;
       const itemId = box.dataset.item;
       if (!skipped[itemId]) skipped[itemId] = new Set();
@@ -979,29 +1214,37 @@
         return;
       }
       if (button.dataset.choose) {
-        showNotice("Prüfe diesen Titel…", "busy");
-        const data = await post("/api/focus", { item_id: button.dataset.choose });
-        if (!data) return;
-        picked = data.finding ? null : data;
-        document.getElementById("query").value = "";
-        renderHits([]);
-        if (data.finding) {
-          showNotice(data.clean ? "Die Angaben passen. Du kannst trotzdem ein anderes Plakat wählen." : "Anpassung gefunden.", data.clean ? "" : "ok");
-          const proposal = proposalOf(data.finding);
-          openGallery.add(data.finding.item_id);
-          await load();
-          list.scrollIntoView({ behavior: "smooth", block: "start" });
-          if (proposal) loadGallery(data.finding.item_id, proposal.key);
-        } else {
-          showNotice(data.clean ? "Keine Anpassung nötig." : "Anpassung gefunden.", data.clean ? "" : "ok");
-          await load();
-        }
+        returnTab = "list";
+        await focusTitle(button.dataset.choose);
+        return;
+      }
+      if (button.dataset.libopen) {
+        returnTab = "library";
+        showTab("list");
+        await focusTitle(button.dataset.libopen);
+        return;
+      }
+      if (button.dataset.tab) {
+        showTab(button.dataset.tab);
+        return;
+      }
+      if (button.dataset.libkind) {
+        if (library.kind === button.dataset.libkind) return;
+        library.kind = button.dataset.libkind;
+        library.selected.clear();
+        document.querySelectorAll("[data-libkind]").forEach((item) => item.classList.toggle("active", item === button));
+        await loadLibrary(true);
         return;
       }
       if (button.dataset.back) {
         await post("/api/focus/clear");
         showNotice("", "");
         await load();
+        if (returnTab === "library") {
+          showTab("library");
+          await loadLibrary(true);
+        }
+        returnTab = "list";
         return;
       }
       if (button.dataset.gallery) {

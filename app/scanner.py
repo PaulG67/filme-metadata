@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
 from datetime import datetime, timezone
 
 from app.config import Settings, load_settings
@@ -26,13 +27,15 @@ from app.identify import (
     systems_differ,
     _public_candidate,
 )
-from app.jellyfin import JellyfinClient, JellyfinError, candidate_from_jellyfin, has_primary_image
+from app.jellyfin import JellyfinClient, JellyfinError, candidate_from_jellyfin, has_primary_image, matches_compact
 from app.plex import PlexClient, PlexError, PlexIndex
 from app.posters import fetch_poster, poster_url
 from app.tmdb import TmdbClient
 
 log = logging.getLogger("filme-metadata")
 
+LIBRARY_CACHE_SECONDS = 120
+MAX_CHECK = 50
 FIELD_KEYS = ["name", "year", "original", "tmdb", "imdb", "tvdb", "overview", "poster"]
 ID_FIELDS = {"tmdb": "Tmdb", "imdb": "Imdb", "tvdb": "Tvdb"}
 
@@ -54,6 +57,7 @@ class Scanner:
             "accepted": {"jellyfin": {}, "plex": {}},
             "focus": None,
         }
+        self._library_cache: tuple[float, list[dict]] | None = None
         self._load()
 
     def _lookup(self, item_id: str) -> dict | None:
@@ -200,6 +204,7 @@ class Scanner:
                     client.download_poster(item_id, url)
                 written = _merged_values(_side_values(snapshot, "jellyfin"), candidate, picked)
             with self._lock:
+                self._library_cache = None
                 current = self._lookup(item_id)
                 if current is not None:
                     _remember_written(self._state["accepted"], current, written, ["jellyfin"])
@@ -409,12 +414,110 @@ class Scanner:
         source = playback_source(client, item, kind_hint, playable)
         return {"ok": True, **save_clip(client, settings, target_id, source)}
 
-    def poster(self, item_id: str, side: str, key: str) -> tuple[bytes, str]:
+    def browse(
+        self,
+        kind: str,
+        term: str = "",
+        missing_only: bool = False,
+        open_only: bool = False,
+        start: int = 0,
+        limit: int = 60,
+        refresh: bool = False,
+    ) -> dict:
+        now = time.monotonic()
+        with self._lock:
+            cached = self._library_cache
+        if refresh or cached is None or now - cached[0] > LIBRARY_CACHE_SECONDS:
+            client = _client(load_settings())
+            try:
+                items = [item for item in client.list_media() if is_media_item(item)]
+            finally:
+                client.http.close()
+            cached = (now, items)
+            with self._lock:
+                self._library_cache = cached
+        wanted = "Series" if kind == "series" else "Movie"
+        with self._lock:
+            open_ids = {item["item_id"] for item in self._state["findings"]}
+            ignored = set(self._state["ignored"])
+        query = term.strip()
+        rows = []
+        for item in cached[1]:
+            if item.get("Type") != wanted:
+                continue
+            if query and not _library_matches(query, item):
+                continue
+            has_poster = has_primary_image(item)
+            if missing_only and has_poster:
+                continue
+            if open_only and item["Id"] not in open_ids:
+                continue
+            rows.append(
+                {
+                    "id": item["Id"],
+                    "kind": "series" if wanted == "Series" else "movie",
+                    "name": item.get("Name") or "",
+                    "year": _item_year(item),
+                    "has_poster": has_poster,
+                    "open": item["Id"] in open_ids,
+                    "ignored": item["Id"] in ignored,
+                }
+            )
+        start = max(0, start)
+        return {"ok": True, "total": len(rows), "start": start, "items": rows[start : start + max(1, min(limit, 200))]}
+
+    def check_items(self, item_ids: list[str]) -> dict:
+        if not item_ids:
+            raise RuntimeError("Nichts ausgewählt")
+        if len(item_ids) > MAX_CHECK:
+            raise RuntimeError(f"Höchstens {MAX_CHECK} Titel auf einmal prüfen")
+        with self._lock:
+            if self._state["running"]:
+                raise RuntimeError("Scan läuft noch")
+        settings = load_settings()
+        client = _client(settings)
+        tmdb = TmdbClient(settings.tmdb_api_key) if settings.tmdb_api_key else None
+        plex_index = None
+        if settings.plex_token:
+            plex = PlexClient(settings.plex_baseurl, settings.plex_token, settings.verify_tls)
+            try:
+                plex_index = plex.library()
+            except PlexError as exc:
+                log.warning("Plex für Auswahl nicht geladen: %s", exc)
+            finally:
+                plex.close()
+        found: list[str] = []
+        clean: list[str] = []
+        errors: list[str] = []
+        for item_id in item_ids:
+            try:
+                item = client.media_item(item_id)
+                if not is_media_item(item):
+                    continue
+                finding, _outcome = self._inspect(client, tmdb, item, plex_index)
+            except (JellyfinError, RuntimeError, OSError) as exc:
+                errors.append(f"{item_id}: {exc}")
+                continue
+            name = item.get("Name") or item_id
+            if finding is None:
+                clean.append(name)
+                continue
+            found.append(name)
+            with self._lock:
+                rest = [entry for entry in self._state["findings"] if entry["item_id"] != finding["item_id"]]
+                self._state["findings"] = [finding, *rest]
+                self._state["ignored"] = [entry for entry in self._state["ignored"] if entry != finding["item_id"]]
+        with self._lock:
+            self._remember_stats()
+            self._save()
+        return {"ok": True, "found": found, "clean": clean, "errors": errors}
+
+    def poster(self, item_id: str, side: str, key: str, width: int = 480) -> tuple[bytes, str]:
         settings = load_settings()
         client = _client(settings)
         try:
             if side == "current":
-                image = client.primary_image(item_id)
+                image = client.primary_image(item_id, width)
                 if image is None:
                     raise KeyError("Kein Plakat")
                 return image
@@ -852,6 +955,14 @@ def _client(settings: Settings) -> JellyfinClient:
 
 def is_media_item(item: dict) -> bool:
     return item.get("Type") in {"Movie", "Series"}
+
+
+def _library_matches(query: str, item: dict) -> bool:
+    names = (item.get("Name") or "", item.get("OriginalTitle") or "")
+    lowered = query.lower()
+    if any(lowered in name.lower() for name in names):
+        return True
+    return matches_compact(query, *names, item.get("Path") or "")
 
 
 def is_collection_finding(finding: dict) -> bool:

@@ -10,7 +10,9 @@ Beispiel: der Ordner heisst `Marvel's Inhumans (2017)`, Jellyfin zeigt **Hotel I
 | TMDB | 68716 | 276288 |
 | Staffel 1 | 8 Folgen | 13 Folgen |
 
-Die App schreibt nichts von selbst. In der Web-UI siehst du den Vorschlag, Pfad und Dateiname, das aktuelle Jellyfin-Plakat und das Plakat der neuen Fassung, und setzt die Fassung mit einem Button in Jellyfin, Plex oder beide. Fehlt nur das Cover, erscheint der Titel unter „Ohne Plakat“. Sammlungen (Ordner wie „James Bond Collection“) werden nicht vorgeschlagen. Tippst du einen Suchtreffer an, zeigt die Seite nur diesen Titel, auch wenn alles passt. Mit „Anderes Plakat wählen“ öffnet sich eine Galerie mit den Plakaten aus Jellyfin und TMDB. Das angetippte Plakat schreibt erst der grüne Button. Eine Suche ohne Leerzeichen, zum Beispiel `underthedome`, findet „Under the Dome“. TMDB, IMDb und TVDB sind anklickbar: dann erscheinen Beschreibung, Besetzung und, mit TMDB-Key, der Trailer.
+Die App schreibt nichts von selbst. In der Web-UI siehst du den Vorschlag, Pfad und Dateiname, das aktuelle Jellyfin-Plakat und das Plakat der neuen Fassung, und setzt die Fassung mit einem Button in Jellyfin, Plex oder beide. Fehlt nur das Cover, erscheint der Titel unter „Ohne Plakat“. Sammlungen (Ordner wie „James Bond Collection“) werden nicht vorgeschlagen. Tippst du einen Suchtreffer an, zeigt die Seite nur diesen Titel, auch wenn alles passt. Mit „Anderes Plakat wählen“ öffnet sich eine Galerie mit den Plakaten aus Jellyfin und TMDB. Das angetippte Plakat schreibt erst der grüne Button.
+
+Der Reiter „Bibliothek“ zeigt alle Serien und Filme mit Plakat, wie in Jellyfin. Filter: Name, nur ohne Plakat, nur mit Vorschlag. Ein Plakat antippen prüft diesen Titel. Mit den Häkchen wählst du bis zu 50 Titel und prüfst sie mit „Auswahl prüfen“. Funde landen im Reiter „Vorschläge“. Eine Suche ohne Leerzeichen, zum Beispiel `underthedome`, findet „Under the Dome“. TMDB, IMDb und TVDB sind anklickbar: dann erscheinen Beschreibung, Besetzung und, mit TMDB-Key, der Trailer.
 
 ## So wird identifiziert
 
