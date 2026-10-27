@@ -32,6 +32,9 @@ from app.tmdb import TmdbClient
 
 log = logging.getLogger("filme-metadata")
 
+FIELD_KEYS = ["name", "year", "original", "tmdb", "imdb", "tvdb", "overview", "poster"]
+ID_FIELDS = {"tmdb": "Tmdb", "imdb": "Imdb", "tvdb": "Tvdb"}
+
 
 class Scanner:
     def __init__(self) -> None:
@@ -119,10 +122,21 @@ class Scanner:
         thread = threading.Thread(target=self._run, name="scan", daemon=True)
         thread.start()
 
-    def apply(self, item_id: str, candidate_key: str, targets: list[str] | None = None) -> dict:
+    def apply(
+        self,
+        item_id: str,
+        candidate_key: str,
+        targets: list[str] | None = None,
+        fields: list[str] | None = None,
+    ) -> dict:
         chosen = [target for target in (targets or ["jellyfin"]) if target in {"jellyfin", "plex"}]
         if not chosen:
             raise RuntimeError("Kein Ziel angegeben")
+        picked = None
+        if fields is not None and not candidate_key.startswith("side:"):
+            picked = [field for field in FIELD_KEYS if field in fields]
+            if not picked:
+                raise RuntimeError("Nichts zum Übernehmen ausgewählt")
         with self._lock:
             if self._state["running"]:
                 raise RuntimeError("Scan läuft noch")
@@ -146,14 +160,25 @@ class Scanner:
             if snapshot.get("jellyfin_accepted"):
                 raise RuntimeError("Jellyfin ist als stimmend markiert")
             client = _client(settings)
-            client.unlock(item_id)
-            client.apply_remote(item_id, body)
-            if kind == "series":
-                client.refresh(item_id)
+            written = candidate
+            if picked is None:
+                client.unlock(item_id)
+                client.apply_remote(item_id, body)
+                if kind == "series":
+                    client.refresh(item_id)
+            else:
+                url = self._poster_for(client, settings, snapshot, candidate) if "poster" in picked else ""
+                client.unlock(item_id)
+                changes = _field_changes(candidate, picked)
+                if changes:
+                    client.write_fields(item_id, changes)
+                if url:
+                    client.download_poster(item_id, url)
+                written = _merged_values(_side_values(snapshot, "jellyfin"), candidate, picked)
             with self._lock:
                 current = next((item for item in self._state["findings"] if item["item_id"] == item_id), None)
                 if current is not None:
-                    _remember_written(self._state["accepted"], current, candidate, ["jellyfin"])
+                    _remember_written(self._state["accepted"], current, written, ["jellyfin"])
                     if not still_open(current):
                         self._state["findings"] = [item for item in self._state["findings"] if item["item_id"] != item_id]
                 self._remember_stats()
@@ -165,20 +190,47 @@ class Scanner:
                 raise RuntimeError("Plex ist als stimmend markiert")
             if not settings.plex_token:
                 raise PlexError("PLEX_TOKEN fehlt")
-            plex = PlexClient(settings.plex_baseurl, settings.plex_token, settings.verify_tls)
-            try:
-                plex.match(plex_id, candidate.get("name") or "", candidate.get("year"), candidate.get("provider_ids") or {})
-            finally:
-                plex.close()
+            written = candidate
+            if picked is None:
+                plex = PlexClient(settings.plex_baseurl, settings.plex_token, settings.verify_tls)
+                try:
+                    plex.match(plex_id, candidate.get("name") or "", candidate.get("year"), candidate.get("provider_ids") or {})
+                finally:
+                    plex.close()
+            else:
+                url = ""
+                if "poster" in picked:
+                    client = _client(settings)
+                    url = self._poster_for(client, settings, snapshot, candidate)
+                written = _merged_values(_side_values(snapshot, "plex"), candidate, picked)
+                changes = _field_changes(candidate, picked)
+                plex = PlexClient(settings.plex_baseurl, settings.plex_token, settings.verify_tls)
+                try:
+                    # Plex cannot store a single ID; a new ID means matching the whole edition.
+                    if changes.get("ids"):
+                        plex.match(plex_id, written.get("name") or "", written.get("year"), written.get("provider_ids") or {})
+                    text = {key: value for key, value in changes.items() if key != "ids"}
+                    if text:
+                        plex.edit_fields(plex_id, kind, text)
+                    if url:
+                        plex.set_poster(plex_id, url)
+                finally:
+                    plex.close()
             with self._lock:
                 current = next((item for item in self._state["findings"] if item["item_id"] == item_id), None)
                 if current is not None:
-                    _remember_written(self._state["accepted"], current, candidate, ["plex"])
+                    _remember_written(self._state["accepted"], current, written, ["plex"])
                     if not still_open(current):
                         self._state["findings"] = [item for item in self._state["findings"] if item["item_id"] != item_id]
                 self._remember_stats()
                 self._save()
-        return {"ok": True, "name": candidate["name"], "targets": chosen}
+        return {"ok": True, "name": written.get("name") or candidate["name"], "targets": chosen, "fields": picked}
+
+    def _poster_for(self, client: JellyfinClient, settings: Settings, finding: dict, candidate: dict) -> str:
+        url = poster_url(candidate.get("poster")) or self._resolve_poster(client, settings, finding, candidate)
+        if not url:
+            raise RuntimeError("Für diese Fassung ist kein Plakat zu finden")
+        return url
 
     def accept(self, item_id: str, system: str) -> dict:
         systems = ["jellyfin", "plex"] if system == "both" else [system]
@@ -198,7 +250,8 @@ class Scanner:
             self._save()
         return {"ok": True}
 
-    def apply_sure(self) -> dict:
+    def apply_sure(self, selections: dict | None = None) -> dict:
+        selections = selections or {}
         with self._lock:
             queued = []
             for item in self._state["findings"]:
@@ -217,7 +270,8 @@ class Scanner:
         errors = []
         for item_id, key, targets in queued:
             try:
-                result = self.apply(item_id, key, targets)
+                fields = selections.get(item_id)
+                result = self.apply(item_id, key, targets, fields if isinstance(fields, list) else None)
                 done.append(result["name"])
             except Exception as exc:
                 log.exception("Korrektur fehlgeschlagen")
@@ -1005,34 +1059,68 @@ def _remember_written(accepted: dict, finding: dict, candidate: dict, targets: l
         plex["original"] = candidate.get("original_name") or ""
 
 
-def _side_candidate(finding: dict, system: str) -> dict:
+def _side_values(finding: dict, system: str) -> dict:
     if system == "plex":
         source = finding.get("plex") or {}
         if not source:
             raise KeyError("Kein Plex-Eintrag")
-        name = source.get("name") or ""
-        year = source.get("year")
-        ids = source.get("ids") or {}
-        original = source.get("original") or ""
-        overview = source.get("overview") or ""
-    else:
-        name = finding.get("jellyfin_name") or ""
-        year = finding.get("jellyfin_year")
-        ids = finding.get("jellyfin_ids") or {}
-        original = finding.get("jellyfin_original") or ""
-        overview = finding.get("jellyfin_overview") or ""
-    if not norm_provider_ids(ids):
-        raise RuntimeError("Keine IMDb-, TMDB- oder TVDB-ID zum Übernehmen")
+        return {
+            "name": source.get("name") or "",
+            "year": source.get("year"),
+            "original_name": source.get("original") or "",
+            "provider_ids": dict(source.get("ids") or {}),
+            "overview": source.get("overview") or "",
+        }
     return {
-        "key": f"side:{system}",
-        "name": name,
-        "year": year,
-        "original_name": original,
-        "provider_ids": ids,
-        "overview": overview,
-        "auto": False,
-        "raw": None,
+        "name": finding.get("jellyfin_name") or "",
+        "year": finding.get("jellyfin_year"),
+        "original_name": finding.get("jellyfin_original") or "",
+        "provider_ids": dict(finding.get("jellyfin_ids") or {}),
+        "overview": finding.get("jellyfin_overview") or "",
     }
+
+
+def _side_candidate(finding: dict, system: str) -> dict:
+    values = _side_values(finding, system)
+    if not norm_provider_ids(values["provider_ids"]):
+        raise RuntimeError("Keine IMDb-, TMDB- oder TVDB-ID zum Übernehmen")
+    return {"key": f"side:{system}", **values, "auto": False, "raw": None}
+
+
+def _field_changes(candidate: dict, picked: list[str]) -> dict:
+    changes: dict = {}
+    if "name" in picked:
+        changes["name"] = candidate.get("name") or ""
+    if "year" in picked:
+        changes["year"] = candidate.get("year")
+    if "original" in picked:
+        changes["original"] = candidate.get("original_name") or ""
+    if "overview" in picked:
+        changes["overview"] = candidate.get("overview") or ""
+    ids = candidate.get("provider_ids") or {}
+    picked_ids = {key: ids.get(key) or "" for field, key in ID_FIELDS.items() if field in picked}
+    if picked_ids:
+        changes["ids"] = picked_ids
+    return changes
+
+
+def _merged_values(current: dict, candidate: dict, picked: list[str]) -> dict:
+    merged = {**current, "provider_ids": dict(current.get("provider_ids") or {})}
+    changes = _field_changes(candidate, picked)
+    if changes.get("name"):
+        merged["name"] = changes["name"]
+    if "year" in changes:
+        merged["year"] = changes["year"]
+    if "original" in changes:
+        merged["original_name"] = changes["original"]
+    if "overview" in changes:
+        merged["overview"] = changes["overview"]
+    for key, value in (changes.get("ids") or {}).items():
+        if value:
+            merged["provider_ids"][key] = value
+        else:
+            merged["provider_ids"].pop(key, None)
+    return merged
 
 
 def _public_plex(item: dict) -> dict:

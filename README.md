@@ -32,6 +32,8 @@ Der **Ordner** sagt, was du hast. Die **Provider-ID** sagt, welches Werk das ist
 
 Übernehmen setzt die Provider-IDs und lässt Jellyfin oder Plex Metadaten und Bilder ersetzen. Bei Serien auf Jellyfin werden die Folgen danach neu geladen. Der Gesehen-Status liegt in den Benutzerdaten und bleibt.
 
+Jede geänderte Zeile und das Plakat haben ein Häkchen. Nimmst du eins weg, schreibt die App nur die angehakten Felder und lässt den Rest stehen. Der Button heißt dann „Auswahl in … übernehmen“. Auf Plex lässt sich eine einzelne ID nicht setzen: eine neue ID matcht dort die ganze Fassung, Titel, Jahr, Originaltitel und Beschreibung werden danach gesperrt gesetzt.
+
 Ein abweichender Folgenindex (`S01E03` in der Datei, Jellyfin zeigt E01) kann getrennt gesetzt werden.
 
 ## Unraid

@@ -76,6 +76,10 @@
     .posters figcaption { margin-top: 6px; color: var(--muted); font-size: 12px; text-align: center; }
     iframe.trailer { width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: 8px; background: #000; margin-top: .7rem; }
     .idhint { margin: .45rem 0 0; font-size: .85rem; }
+    label.take { display: inline-flex; align-items: center; gap: .35rem; cursor: pointer; }
+    label.take input { width: 1rem; height: 1rem; margin: 0; accent-color: var(--ok, #22c55e); }
+    .posters label.take { margin-top: 4px; font-size: 12px; justify-content: center; width: 100%; }
+    tr.skipped td.value.after { opacity: .45; text-decoration: line-through; }
     @media (max-width: 640px) { .detail-grid { grid-template-columns: 1fr; } .detail-grid img { width: 120px; } }
     input[type="search"] {
       width: 100%;
@@ -188,6 +192,8 @@
     const notice = document.getElementById("notice");
     let polling = null;
     let searchTimer = null;
+    const skipped = {};
+    let shownFindings = {};
     let picked = null;
     let busy = false;
     let stageClip = null;
@@ -386,6 +392,31 @@
     }
 
     const fieldLabels = ["Titel", "Jahr", "Originaltitel", "TMDB", "IMDb", "TVDB", "Beschreibung"];
+    const fieldKeys = { Titel: "name", Jahr: "year", Originaltitel: "original", TMDB: "tmdb", IMDb: "imdb", TVDB: "tvdb", Beschreibung: "overview" };
+
+    function canPick(finding) {
+      return Boolean(proposalOf(finding)) && (!finding.jellyfin_accepted || (finding.plex && !finding.plex.accepted));
+    }
+
+    function isSkipped(itemId, field) {
+      return Boolean(skipped[itemId] && skipped[itemId].has(field));
+    }
+
+    function takeBox(finding, field, text) {
+      const checked = isSkipped(finding.item_id, field) ? "" : " checked";
+      return `<label class="take"><input type="checkbox" data-take="${esc(field)}" data-item="${esc(finding.item_id)}"${checked}>${esc(text)}</label>`;
+    }
+
+    function pickableFields(finding) {
+      if (!canPick(finding)) return [];
+      return changedFields(finding).map((label) => fieldKeys[label]).concat("poster");
+    }
+
+    function selectedFields(finding) {
+      const fields = pickableFields(finding);
+      if (!fields.some((field) => isSkipped(finding.item_id, field))) return null;
+      return fields.filter((field) => !isSkipped(finding.item_id, field));
+    }
 
     function changedFields(finding) {
       const columns = compareColumns(finding);
@@ -426,13 +457,14 @@
       const proposal = proposalOf(finding);
       const current = `<figure><img data-poster alt="" src="/api/poster/${encodeURIComponent(finding.item_id)}?side=current"><figcaption>Jetzt in Jellyfin</figcaption></figure>`;
       const next = proposal
-        ? `<figure><img data-poster alt="" src="/api/poster/${encodeURIComponent(finding.item_id)}?side=proposal&key=${encodeURIComponent(proposal.key || "")}"><figcaption>Nach der Änderung</figcaption></figure>`
+        ? `<figure><img data-poster alt="" src="/api/poster/${encodeURIComponent(finding.item_id)}?side=proposal&key=${encodeURIComponent(proposal.key || "")}"><figcaption>Nach der Änderung${canPick(finding) ? takeBox(finding, "poster", "Plakat übernehmen") : ""}</figcaption></figure>`
         : "";
       return `<div class="posters">${current}${next}</div>`;
     }
 
     function compareTable(finding) {
       const columns = compareColumns(finding);
+      const pick = canPick(finding);
       const body = changedFields(finding).map((label) => {
         const cells = columns.map((column) => {
           const value = shown(fieldValue(column, label));
@@ -440,14 +472,21 @@
           const content = idButton(finding, column, label, value);
           return `<td class="value ${tone}">${content}</td>`;
         }).join("");
-        return `<tr class="changed"><td class="k">${esc(label)}</td>${cells}</tr>`;
+        const field = fieldKeys[label];
+        const name = pick ? takeBox(finding, field, label) : esc(label);
+        const skip = pick && isSkipped(finding.item_id, field) ? " skipped" : "";
+        return `<tr class="changed${skip}"><td class="k">${name}</td>${cells}</tr>`;
       }).join("");
       if (!body) return "";
       const head = columns.map((column) => `<th>${esc(column.heading)}</th>`).join("");
+      const pickHint = pick
+        ? `<p class="muted idhint">Häkchen weg: Dieser Wert bleibt, wie er ist.${finding.plex && !finding.plex.accepted ? " Auf Plex zieht eine neue ID die ganze Fassung nach." : ""}</p>`
+        : "";
       return `<div class="compare-wrap"><table class="compare">
-        <thead><tr><th></th>${head}</tr></thead>
+        <thead><tr><th>${pick ? "Übernehmen" : ""}</th>${head}</tr></thead>
         <tbody>${body}</tbody>
       </table></div>
+      ${pickHint}
       <p class="muted idhint">TMDB, IMDb oder TVDB antippen: Beschreibung, Besetzung und Trailer.</p>`;
     }
 
@@ -462,6 +501,13 @@
       if (target === "jellyfin,plex") return `Beide auf „${title}“ setzen`;
       if (target === "plex") return `Plex auf „${title}“ setzen`;
       return `Jellyfin auf „${title}“ setzen`;
+    }
+
+    function pickLabel(finding, target, title) {
+      if (!selectedFields(finding)) return setButton(target, title);
+      if (target === "jellyfin,plex") return "Auswahl in beide übernehmen";
+      if (target === "plex") return "Auswahl in Plex übernehmen";
+      return "Auswahl in Jellyfin übernehmen";
     }
 
     function workLabel(name, year) {
@@ -512,14 +558,15 @@
         </div>
       `).join("");
       const buttons = [];
+      const pickButton = (tone, targets) => `<button type="button" class="${tone}" data-apply="${esc(finding.item_id)}" data-key="${esc(proposal.key)}" data-targets="${targets}" data-pick="1" data-work="${esc(proposalLabel)}">${esc(pickLabel(finding, targets, proposalLabel))}</button>`;
       if (proposal && !finding.jellyfin_accepted) {
-        buttons.push(`<button type="button" class="${proposal.auto ? "ok" : ""}" data-apply="${esc(finding.item_id)}" data-key="${esc(proposal.key)}" data-targets="jellyfin">${esc(setButton("jellyfin", proposalLabel))}</button>`);
+        buttons.push(pickButton(proposal.auto ? "ok" : "", "jellyfin"));
       }
       if (proposal && finding.plex && !finding.plex.accepted) {
-        buttons.push(`<button type="button" class="secondary" data-apply="${esc(finding.item_id)}" data-key="${esc(proposal.key)}" data-targets="plex">${esc(setButton("plex", proposalLabel))}</button>`);
+        buttons.push(pickButton("secondary", "plex"));
       }
       if (proposal && finding.plex && !finding.jellyfin_accepted && !finding.plex.accepted) {
-        buttons.push(`<button type="button" class="ok" data-apply="${esc(finding.item_id)}" data-key="${esc(proposal.key)}" data-targets="jellyfin,plex">${esc(setButton("jellyfin,plex", proposalLabel))}</button>`);
+        buttons.push(pickButton("ok", "jellyfin,plex"));
       }
       if (finding.plex && !finding.plex.accepted && sidesDiffer(finding)) {
         buttons.push(`<button type="button" class="secondary" data-apply="${esc(finding.item_id)}" data-key="side:jellyfin" data-targets="plex">Plex auf den Jellyfin-Stand setzen</button>`);
@@ -558,12 +605,13 @@
 
     function renderList(data) {
       const findings = (data.findings || []).filter(hasAdjustment);
+      shownFindings = Object.fromEntries(findings.map((item) => [item.item_id, item]));
       if (!findings.length) {
         list.innerHTML = `<div class="empty">${data.running ? "Prüfung läuft." : "Keine Anpassung offen. Oben kannst du trotzdem einen Titel aus der Bibliothek wählen."}</div>`;
         return;
       }
       const groups = [
-        ["Sicher", findings.filter((item) => item.status === "sure"), "Diese Vorschläge schreibt der grüne Button oben. Markierte Angaben bleiben."],
+        ["Sicher", findings.filter((item) => item.status === "sure"), "Diese Vorschläge schreibt der grüne Button oben. Er schreibt nur die angehakten Angaben."],
         ["Ohne Plakat", findings.filter((item) => item.missing_poster), "Die Zuordnung bleibt. Setzen lädt das Cover der genannten Fassung."],
         ["Plex weicht ab", findings.filter((item) => item.status === "split" && !item.missing_poster), "Wähle, welches System die Angaben übernimmt."],
         ["Prüfen", findings.filter((item) => item.status !== "sure" && item.status !== "split" && !item.missing_poster), "Noch nicht eindeutig. Nichts wird automatisch geschrieben."]
@@ -695,7 +743,12 @@
     document.getElementById("sureBtn").onclick = async () => {
       if (!confirm("Sichere Vorschläge jetzt schreiben? Jellyfin immer, Plex nur bei einem anderen Treffer.")) return;
       showNotice("Schreibe sichere Anpassungen…", "busy");
-      const data = await post("/api/apply-sure");
+      const selections = {};
+      Object.values(shownFindings).forEach((finding) => {
+        const fields = finding.status === "sure" ? selectedFields(finding) : null;
+        if (fields) selections[finding.item_id] = fields;
+      });
+      const data = await post("/api/apply-sure", { selections });
       if (data) showNotice(data.applied && data.applied.length ? ("Übernommen: " + data.applied.join(", ")) : "Nichts Sicheres offen", data.applied && data.applied.length ? "ok" : "");
       load();
     };
@@ -798,6 +851,23 @@
       image.replaceWith(missing);
     }, true);
 
+    document.body.addEventListener("change", (event) => {
+      const box = event.target;
+      if (!box.dataset || !box.dataset.take) return;
+      const itemId = box.dataset.item;
+      if (!skipped[itemId]) skipped[itemId] = new Set();
+      if (box.checked) skipped[itemId].delete(box.dataset.take);
+      else skipped[itemId].add(box.dataset.take);
+      const row = box.closest("tr");
+      if (row) row.classList.toggle("skipped", !box.checked);
+      const finding = shownFindings[itemId];
+      const card = box.closest("article");
+      if (!finding || !card) return;
+      card.querySelectorAll("button[data-pick]").forEach((button) => {
+        button.textContent = pickLabel(finding, button.dataset.targets, button.dataset.work);
+      });
+    });
+
     document.body.addEventListener("click", async (event) => {
       const button = event.target.closest("button");
       if (!button || busy && !button.dataset.listen) return;
@@ -841,13 +911,24 @@
         return;
       }
       if (button.dataset.apply) {
-        showNotice("Schreibe Änderung…", "busy");
-        const data = await post("/api/apply", {
+        const request = {
           item_id: button.dataset.apply,
           key: button.dataset.key,
           targets: (button.dataset.targets || "jellyfin").split(",")
-        });
-        if (data) showNotice("Übernommen: " + data.name, "ok");
+        };
+        const finding = shownFindings[button.dataset.apply];
+        const fields = button.dataset.pick && finding ? selectedFields(finding) : null;
+        if (fields && !fields.length) {
+          showNotice("Nichts angehakt. Setze ein Häkchen oder nimm „so lassen“.", "");
+          return;
+        }
+        if (fields) request.fields = fields;
+        showNotice("Schreibe Änderung…", "busy");
+        const data = await post("/api/apply", request);
+        if (data) {
+          delete skipped[button.dataset.apply];
+          showNotice("Übernommen: " + data.name, "ok");
+        }
       } else if (button.dataset.accept) {
         const data = await post("/api/accept", { item_id: button.dataset.accept, system: button.dataset.system });
         if (data) showNotice("Angaben gespeichert. Dieser Stand wird nicht wieder vorgeschlagen.", "ok");

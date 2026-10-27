@@ -194,6 +194,25 @@ class PlexClient:
         except PlexError:
             return
 
+    def edit_fields(self, rating_key: str, kind: str, values: dict) -> None:
+        root = ET.fromstring(self._request("GET", f"/library/metadata/{rating_key}").text)
+        section = root.attrib.get("librarySectionID")
+        if not section:
+            node = next(iter(root), None)
+            section = node.attrib.get("librarySectionID") if node is not None else None
+        if not section:
+            raise PlexError("Plex-Bibliothek des Eintrags nicht gefunden")
+        params = {"type": "1" if kind == "movie" else "2", "id": rating_key}
+        # Locked fields survive the next Plex refresh, so the choice sticks.
+        for key, field in (("name", "title"), ("year", "year"), ("original", "originalTitle"), ("overview", "summary")):
+            if key in values:
+                params[f"{field}.value"] = "" if values[key] is None else str(values[key])
+                params[f"{field}.locked"] = "1"
+        self._request("PUT", f"/library/sections/{section}/all", params)
+
+    def set_poster(self, rating_key: str, url: str) -> None:
+        self._request("POST", f"/library/metadata/{rating_key}/posters", {"url": url})
+
 
 def _single(items: list[dict]) -> dict | None:
     if len(items) == 1:

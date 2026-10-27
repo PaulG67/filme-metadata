@@ -371,6 +371,34 @@ class JellyfinClient:
         item["LockData"] = False
         self._request("POST", f"/Items/{item_id}", json=item, timeout=60)
 
+    def write_fields(self, item_id: str, values: dict) -> None:
+        item = self.item_record(item_id)
+        if "name" in values and values["name"]:
+            item["Name"] = values["name"]
+        if "year" in values:
+            item["ProductionYear"] = int(values["year"]) if values["year"] else None
+        if "original" in values:
+            item["OriginalTitle"] = values["original"] or ""
+        if "overview" in values:
+            item["Overview"] = values["overview"] or ""
+        if values.get("ids"):
+            ids = dict(item.get("ProviderIds") or {})
+            for key, value in values["ids"].items():
+                if value:
+                    ids[key] = str(value)
+                else:
+                    ids.pop(key, None)
+            item["ProviderIds"] = ids
+        self._request("POST", f"/Items/{item_id}", json=item, timeout=60)
+
+    def download_poster(self, item_id: str, url: str) -> None:
+        self._request(
+            "POST",
+            f"/Items/{item_id}/RemoteImages/Download",
+            params={"type": "Primary", "imageUrl": url},
+            timeout=120,
+        )
+
     def set_episode_index(self, item_id: str, season: int, episode: int) -> None:
         item = self.item_record(item_id)
         item["ParentIndexNumber"] = season

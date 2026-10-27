@@ -25,6 +25,12 @@ def _targets(value) -> list[str]:
     return [part for part in value if part in {"jellyfin", "plex"}]
 
 
+def _fields(value) -> list[str] | None:
+    if not isinstance(value, list):
+        return None
+    return [str(part) for part in value]
+
+
 def create_app() -> Flask:
     app = Flask(__name__)
     scanner = Scanner()
@@ -121,6 +127,7 @@ def create_app() -> Flask:
                 str(payload.get("item_id") or ""),
                 str(payload.get("key") or ""),
                 _targets(payload.get("targets")),
+                _fields(payload.get("fields")),
             )
         except KeyError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 404
@@ -146,7 +153,11 @@ def create_app() -> Flask:
     @app.post("/api/apply-sure")
     def apply_sure():
         try:
-            return jsonify(scanner.apply_sure())
+            payload = request.get_json(silent=True) or {}
+            selections = payload.get("selections")
+            if not isinstance(selections, dict):
+                selections = {}
+            return jsonify(scanner.apply_sure({str(key): _fields(value) for key, value in selections.items()}))
         except (JellyfinError, PlexError, RuntimeError, OSError) as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
 
